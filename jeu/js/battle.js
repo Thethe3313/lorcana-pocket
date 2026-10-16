@@ -11,7 +11,7 @@ const AI_POOL = {
   hard: c => /^\d+$/.test(c.set_code),
 };
 const DIFF_INFO = { easy: 'IA imprudente, cartes du set 1', normal: 'IA tactique, cartes des sets 1 à 3', hard: 'IA tactique, toutes les cartes' };
-let setup = { deckId: null, diff: 'normal' };
+let setup = { deckId: null, diff: 'normal', auto: false, fast: true };
 
 // Partie en cours : une seule à la fois ; quitter l'écran de combat l'arrête
 let current = null;
@@ -29,6 +29,10 @@ export function renderBattle(view) {
         : `<p class="muted">Aucun deck valide. <a href="#decks" style="color:var(--gold)">Crée un deck de ${RULES.DECK_SIZE} cartes</a>.</p>`}
     </div>
     <div class="panel"><h2 style="margin-top:0">2. Difficulté</h2><div class="row">${Object.entries(DIFF).map(([k, n]) => `<span class="chip ${setup.diff === k ? 'on' : ''}" data-diff="${k}" style="cursor:pointer;padding:8px 14px;display:block;border-radius:12px"><b>${n}</b> · victoire +${R.WIN_REWARD[k]} 🪙<br><small class="muted">${DIFF_INFO[k]}</small></span>`).join('')}</div></div>
+    <div class="panel"><h2 style="margin-top:0">3. Mode</h2><div class="row">
+      <span class="chip ${setup.auto ? '' : 'on'}" data-auto="0" style="cursor:pointer;padding:8px 14px">🎮 Je joue</span>
+      <span class="chip ${setup.auto ? 'on' : ''}" data-auto="1" style="cursor:pointer;padding:8px 14px">🤖 Combat automatique</span></div>
+      <p class="muted" style="margin-bottom:0">En automatique, l'ordinateur joue tes tours à ta place (même niveau que l'IA normale). Tu gagnes les pièces comme d'habitude, et tu peux reprendre la main à tout moment avec le bouton 🤖 Auto.</p></div>
     <button class="btn gold" id="go" ${decks.length ? '' : 'disabled'} style="font-size:1.1rem;padding:14px">⚔️ Lancer le combat</button>
     <details class="panel"><summary><b>Règles du combat</b></summary><ul class="muted">
       <li><b>Encrier</b> : une fois par tour, place une carte marquée ◆encrable face cachée ; chaque carte de l'encrier fournit 1 encre par tour.</li>
@@ -40,6 +44,7 @@ export function renderBattle(view) {
     </ul></details></div>`;
   view.querySelectorAll('[data-deck]').forEach(el => el.onclick = () => { setup.deckId = +el.dataset.deck; renderBattle(view); });
   view.querySelectorAll('[data-diff]').forEach(el => el.onclick = () => { setup.diff = el.dataset.diff; renderBattle(view); });
+  view.querySelectorAll('[data-auto]').forEach(el => el.onclick = () => { setup.auto = el.dataset.auto === '1'; renderBattle(view); });
   const go = $('#go', view); if (go) go.onclick = () => start(view);
 }
 
@@ -55,7 +60,10 @@ function start(view) {
 }
 
 class BattleUI {
-  constructor(view, G, diff) { Object.assign(this, { view, G, diff, sel: null, targeting: null, busy: false, flash: new Set(), ended: false }); }
+  constructor(view, G, diff) { Object.assign(this, { view, G, diff, sel: null, targeting: null, busy: false, flash: new Set(), ended: false, auto: setup.auto }); }
+
+  // Délai entre deux actions affichées (plus court en mode rapide)
+  delay(a) { const base = a.type === 'end' ? 250 : a.type === 'ink' ? 450 : 850; return setup.fast && this.auto ? Math.round(base / 3) : base; }
 
   boot() {
     this.view.onclick = e => this.click(e);
@@ -65,6 +73,7 @@ class BattleUI {
     this.view.oncontextmenu = e => { const id = e.target.closest('.card')?.dataset.id; if (id) { e.preventDefault(); showCard(id); } };
     this.render();
     if (this.G.active === 1) setTimeout(() => this.runAI(), 900);
+    else if (this.auto) setTimeout(() => this.runMe(), 700);
   }
 
   row(inst) { return S.byId.get(inst.card.id); }
@@ -108,9 +117,11 @@ class BattleUI {
       ${this.bar(1)}
       <div class="zone">${opp.play.map(i => this.slot(i, false)).join('') || '<span class="muted">Aucun personnage adverse</span>'}</div>
       <div class="mid">
-        <span class="turn-banner">${G.over ? 'Fin de partie' : myTurn ? `Ton tour (${Math.ceil(G.turnNumber / 2)})` : 'Tour de l\'IA…'}</span>
+        <span class="turn-banner">${G.over ? 'Fin de partie' : myTurn ? `Ton tour (${Math.ceil(G.turnNumber / 2)})${this.auto ? ' · 🤖 auto' : ''}` : 'Tour de l\'IA…'}</span>
         <div class="log" id="log">${G.log.slice(-8).map(l => `<div>${l.p === 0 ? '🟢' : '🔴'} ${esc(l.text)}</div>`).join('')}</div>
         <button class="btn small danger" data-act="quit">Abandonner</button>
+        <button class="btn small ${this.auto ? 'gold' : ''}" data-act="auto" title="L'ordinateur joue tes tours à ta place">🤖 Auto ${this.auto ? 'ON' : 'OFF'}</button>
+        ${this.auto ? `<button class="btn small" data-act="speed" title="Vitesse du mode auto">${setup.fast ? '⏩ Rapide' : '▶ Normal'}</button>` : ''}
         <button class="btn gold" data-act="end" ${myTurn && !this.busy && !t ? '' : 'disabled'}>Fin du tour ⏭</button>
       </div>
       <div class="zone">${me.play.map(i => this.slot(i, true)).join('') || '<span class="muted">Joue des personnages depuis ta main</span>'}</div>
@@ -220,6 +231,12 @@ class BattleUI {
       case 'cancel': this.targeting = null; return this.render();
       case 'skip': { const t = this.targeting; this.targeting = null; return t.done(undefined); }
       case 'end': this.sel = null; this.do({ type: 'end' }); return this.runAI();
+      case 'auto':
+        this.auto = setup.auto = !this.auto;
+        this.sel = null; this.zoom = false; this.targeting = null;
+        if (this.auto && G.active === 0 && !this.busy) return this.runMe();
+        return this.render();
+      case 'speed': setup.fast = !setup.fast; return this.render();
       case 'quit':
         if (!G.over && confirm('Abandonner la partie ?')) { document.body.classList.remove('in-battle'); this.view.onclick = null; location.hash = '#battle'; renderBattle(this.view); }
         return;
@@ -262,17 +279,34 @@ class BattleUI {
     this.checkEnd();
   }
 
+  // Mode auto : l'ordinateur joue le tour du joueur, une action à la fois
+  runMe() {
+    if (current !== this) return;
+    const G = this.G;
+    if (!this.auto || G.over || G.active !== 0) { this.busy = false; this.render(); return this.checkEnd(); }
+    this.busy = true;
+    const a = aiNextAction(G, 'normal');
+    if (!applyAction(G, a).ok) applyAction(G, { type: 'end' });
+    [a.uid, a.target].forEach(u => u != null && this.flash.add(u));
+    this.render();
+    setTimeout(() => (a.type === 'end' ? this.runAI() : this.runMe()), this.delay(a));
+  }
+
   runAI() {
     if (current !== this) return;
     const G = this.G;
-    if (G.over || G.active !== 1) { this.busy = false; this.render(); return this.checkEnd(); }
+    if (G.over || G.active !== 1) {
+      this.busy = false; this.render();
+      if (this.auto && !G.over) return setTimeout(() => this.runMe(), 400);
+      return this.checkEnd();
+    }
     this.busy = true;
     const a = aiNextAction(G, this.diff);
     const r = applyAction(G, a);
     if (!r.ok) applyAction(G, { type: 'end' });
     [a.uid, a.target].forEach(u => u != null && this.flash.add(u));
     this.render();
-    setTimeout(() => this.runAI(), a.type === 'end' ? 250 : a.type === 'ink' ? 450 : 850);
+    setTimeout(() => this.runAI(), this.delay(a));
   }
 
   async checkEnd() {

@@ -18,7 +18,7 @@ Ta partie de la première version (avec le serveur local) a été convertie dans
 - **Collection** : progression par set, filtres, cartes manquantes en grisé, recyclage des doublons en pièces.
 - **Decks** : format Pocket de 30 cartes, 2 exemplaires et 2 encres au maximum, deck automatique.
   **🏆 Meilleur deck** : cherche le deck le plus fort avec tes cartes, tous sets confondus, en simulant des milliers de parties contre des decks de référence puis en l'améliorant carte par carte (`jeu/js/optimizer.js`, dans un Web Worker).
-- **Combat** : règles Lorcana simplifiées (encrier, quêtes, défis, chansons, Alter/Shift, mots-clés), IA facile, normale ou difficile. Premier à 20 lore.
+- **Combat** : règles Lorcana simplifiées (encrier, quêtes, défis, chansons, Alter/Shift, mots-clés), IA facile, normale ou difficile. Premier à 20 lore. **Mode auto** (🤖) : l'ordinateur joue tes tours à ta place, en vitesse normale ou rapide, et tu peux reprendre la main à tout moment.
   Les effets courants (dégâts, pioche, bannissement, soins…) sont appliqués automatiquement à partir du texte officiel anglais ; les autres capacités sont ignorées. Les objets, les lieux et les actions non reconnues ne se jouent pas encore en combat.
 
 ## Le dossier
