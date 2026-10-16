@@ -1,0 +1,6 @@
+# Visuels téléchargés et base SQLite (lourds, et les visuels appartiennent à Disney / Ravensburger)
+/images/
+/data/
+# Sauvegarde personnelle et raccourci (chemin absolu propre à cet ordinateur)
+ma-partie-lorcana.json
+*.lnk

@@ -1,0 +1,26 @@
+# Publie le dossier jeu/ sur GitHub Pages à chaque envoi sur la branche main
+name: Publier le jeu
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploiement.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: jeu
+      - id: deploiement
+        uses: actions/deploy-pages@v4

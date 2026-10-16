@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1026">
+  <meta name="description" content="Jeu de cartes Disney Lorcana façon Pokémon TCG Pocket : boosters, collection, decks et combats contre l'IA.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Lorcana Pocket">
+  <title>Lorcana Pocket</title>
+  <link rel="icon" href="icones/icone-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="icones/icone-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="#home" class="logo">✦ Lorcana <span>Pocket</span></a>
+    <div class="wallet">
+      <span class="pill" id="free-packs" title="Boosters gratuits">🎁 <b>0</b></span>
+      <span class="pill" id="coins" title="Pièces">🪙 <b>0</b></span>
+      <a href="#settings" class="pill" title="Réglages" aria-label="Réglages">⚙️</a>
+    </div>
+  </header>
+  <main id="view"></main>
+  <nav class="tabbar">
+    <a href="#home" data-tab="home"><i>🎴</i>Boosters</a>
+    <a href="#collection" data-tab="collection"><i>📖</i>Collection</a>
+    <a href="#decks" data-tab="decks"><i>🃏</i>Decks</a>
+    <a href="#battle" data-tab="battle"><i>⚔️</i>Combat</a>
+  </nav>
+  <div id="modal" class="modal hidden"></div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="installer.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
