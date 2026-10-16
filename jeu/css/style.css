@@ -119,7 +119,7 @@ input[type=text], input[type=search], select { background: var(--bg2); color: va
 .pack .num { position: absolute; top: 9%; left: 0; right: 0; text-align: center; font-weight: 800; font-size: .8rem; color: rgba(255,255,255,.85); letter-spacing: .2em; }
 .pack .prog { position: absolute; right: 8px; top: 8px; font-size: .7rem; background: rgba(0,0,0,.55); padding: 1px 6px; border-radius: 99px; }
 
-.opening { position: fixed; inset: 0; z-index: 50; background: radial-gradient(circle at 50% 40%, #2b2d80 0%, #070a1c 70%); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 16px; }
+.opening { position: fixed; inset: 0; z-index: 50; background: radial-gradient(circle at 50% 40%, #2b2d80 0%, #070a1c 70%); display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 20px; padding: 16px; overflow-y: auto; }
 .opening .pack { width: min(240px, 60vw); cursor: pointer; animation: wobble 1.6s ease-in-out infinite; }
 .opening .pack.torn { animation: tear .6s forwards; }
 @keyframes wobble { 0%,100% { transform: rotate(-2deg); } 50% { transform: rotate(2deg) scale(1.02); } }
@@ -287,3 +287,13 @@ input[type=text], input[type=search], select { background: var(--bg2); color: va
 @media (hover: none) {
   .hand .card:hover:not(.selected), .card-grid .card:hover, .pack:hover { transform: none; }
 }
+
+/* ---------- Booster Mystère ---------- */
+.pack.mystery { background: linear-gradient(135deg, #f4b223, #9b4fc4 30%, #1a7fd0 55%, #2a9c56 75%, #d4213d); background-size: 300% 300%; animation: rainbow 8s ease infinite; }
+.opening .pack.mystery { animation: rainbow 8s ease infinite, wobble 1.6s ease-in-out infinite; }
+.opening .pack.mystery.torn { animation: tear .6s forwards; }
+@keyframes rainbow { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+.pack .art.mosaic { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; }
+.pack .art.mosaic img { object-position: center 25%; }
+.pack .art.mosaic .q { position: absolute; inset: 0; display: grid; place-items: center; font-family: 'Cinzel', serif; font-weight: 800;
+  font-size: 4rem; color: #fff; text-shadow: 0 0 18px rgba(0,0,0,.9), 0 0 4px #000; background: rgba(11,16,38,.35); }

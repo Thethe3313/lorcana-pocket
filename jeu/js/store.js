@@ -4,17 +4,23 @@ import { buildDeck, validateDeck, RULES } from './engine.js';
 
 const KEY = 'lorcana-pocket-sauvegarde';
 export const ECO = {
-  BOOSTER_PRICE: 50, FREE_PACK_HOURS: 6, FREE_PACK_MAX: 2, START_COINS: 150,
-  WIN_REWARD: { easy: 40, normal: 70, hard: 120 }, LOSS_REWARD: 15,
+  BOOSTER_PRICE: 100, FREE_PACK_HOURS: 6, FREE_PACK_MAX: 2, START_COINS: 200,
+  WIN_REWARD: { easy: 50, normal: 80, hard: 130 }, LOSS_REWARD: 20,
   RECYCLE_VALUE: { Common: 2, Uncommon: 4, Rare: 8, Super_rare: 15, Legendary: 30, Epic: 40, Enchanted: 60, Iconic: 80, Promo: 5 },
-  // poids de tirage de l'emplacement rare d'un booster
-  RARE_WEIGHTS: { Rare: 9, Super_rare: 4, Legendary: 1.5, Epic: 0.3, Enchanted: 0.15, Iconic: 0.05 },
+  // Taux de tirage (en %) d'après les estimations de la communauté (Ravensburger ne publie pas de chiffres officiels) :
+  // Légendaire ≈ 1 booster sur 4, Épique ≈ 1 par boîte de 24, Enchantée ≈ 1 booster sur 50, Iconique ≈ 1 sur 200.
+  // Les deux emplacements « rare ou mieux » (cartes non foil) :
+  RARE_SLOT: { Rare: 55, Super_rare: 32, Legendary: 13 },
+  // L'emplacement foil : toutes raretés ; Épiques, Enchantées et Iconiques ne sortent que là.
+  FOIL_SLOT: { Common: 44, Uncommon: 25, Rare: 15, Super_rare: 7, Legendary: 2.5, Epic: 4, Enchanted: 2, Iconic: 0.5 },
 };
+export const MYSTERY = 'mystere';
+const RARITY_ORDER = ['Common', 'Uncommon', 'Rare', 'Super_rare', 'Legendary', 'Epic', 'Enchanted', 'Iconic'];
 export const STARTERS = [['Amber', 'Amethyst'], ['Ruby', 'Sapphire'], ['Emerald', 'Steel']];
 
 let cards = [], byId = new Map(), boosterSets = [];
 export function initStore(allCards, sets) {
-  cards = allCards; byId = new Map(cards.map(c => [c.id, c]));
+  cards = allCards; byId = new Map(cards.map(c => [c.id, c])); index = null;
   boosterSets = sets.filter(s => /^\d+$/.test(s.code)).map(s => s.code);
 }
 
@@ -77,14 +83,32 @@ function pickWeighted(keys, w) {
   return keys[keys.length - 1];
 }
 
+// Index set -> rareté -> cartes (hors promos)
+let index = null;
+function setIndex() {
+  if (index) return index;
+  index = {};
+  for (const c of cards) if (c.rarity !== 'Promo' && boosterSets.includes(c.set_code)) ((index[c.set_code] ||= {})[c.rarity] ||= []).push(c);
+  return index;
+}
+
+/**
+ * Booster comme les vrais : 6 communes, 3 peu communes, 2 « rare ou mieux », 1 foil (toutes raretés).
+ * set = code d'une extension, ou MYSTERY : chaque carte vient alors d'une extension tirée au hasard.
+ */
 function openBooster(set) {
-  const pool = cards.filter(c => c.set_code === set && c.rarity !== 'Promo');
-  const of = r => pool.filter(c => c.rarity === r);
-  const slots = [pick(of('Common')), pick(of('Common')), pick(of('Common')), pick(of('Uncommon')), pick(of('Uncommon'))];
-  const rare = {};
-  for (const c of pool) if (ECO.RARE_WEIGHTS[c.rarity]) (rare[c.rarity] ||= []).push(c);
-  slots.push(pick(rare[pickWeighted(Object.keys(rare), ECO.RARE_WEIGHTS)]));
-  return slots.filter(Boolean).map(c => ({ id: c.id, foil: Math.random() < 0.08 || ['Enchanted', 'Iconic', 'Epic'].includes(c.rarity) }));
+  const idx = setIndex();
+  const sets = set === MYSTERY ? boosterSets : [set];
+  const has = r => sets.some(s => idx[s]?.[r]?.length);
+  const draw = r => { const from = sets.filter(s => idx[s]?.[r]?.length); const s = pick(from); return pick(idx[s][r]); };
+  const weighted = w => pickWeighted(Object.keys(w).filter(has), w);
+  const out = [];
+  for (let i = 0; i < 6; i++) out.push({ c: draw('Common'), foil: false });
+  for (let i = 0; i < 3; i++) out.push({ c: draw('Uncommon'), foil: false });
+  const rares = [weighted(ECO.RARE_SLOT), weighted(ECO.RARE_SLOT)].sort((a, b) => RARITY_ORDER.indexOf(a) - RARITY_ORDER.indexOf(b));
+  for (const r of rares) out.push({ c: draw(r), foil: false });
+  out.push({ c: draw(weighted(ECO.FOIL_SLOT)), foil: true });  // révélée en dernier
+  return out.filter(x => x.c).map(x => ({ id: x.c.id, foil: x.foil }));
 }
 
 // Mêmes « routes » que l'ancien serveur, pour que l'interface n'ait pas à changer
@@ -106,10 +130,10 @@ const routes = {
   '/api/booster': ({ set, free }) => {
     refillFree();
     const p = load();
-    if (!boosterSets.includes(String(set))) throw new Error('Set inconnu');
+    if (set !== MYSTERY && !boosterSets.includes(String(set))) throw new Error('Set inconnu');
     if (free) { if (p.freePacks < 1) throw new Error('Aucun booster gratuit disponible'); }
     else if (p.coins < ECO.BOOSTER_PRICE) throw new Error('Pas assez de pièces');
-    const pulled = openBooster(String(set));
+    const pulled = openBooster(set === MYSTERY ? MYSTERY : String(set));
     if (free) { if (p.freePacks >= ECO.FREE_PACK_MAX) p.freePacksAt = Date.now(); p.freePacks--; }
     else p.coins -= ECO.BOOSTER_PRICE;
     const result = pulled.map(c => { const isNew = !p.collection[c.id]; addCard(c.id, c.foil); return { ...c, isNew }; });

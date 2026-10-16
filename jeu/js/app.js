@@ -1,6 +1,6 @@
 import { parseCard, validateDeck, buildDeck, RULES, INKS } from './engine.js';
 import { renderBattle, stopBattle } from './battle.js';
-import { localApi, initStore, getLang } from './store.js';
+import { localApi, initStore, getLang, MYSTERY } from './store.js';
 
 // ---------------------------------------------------------------- État global
 // sets : extensions vendues en boosters (1, 2, 3…) ; allSets : toutes, y compris les quêtes
@@ -94,6 +94,21 @@ function featured(code) {
   return cs.find(c => c.rarity === 'Legendary') || cs.find(c => c.rarity === 'Super_rare') || cs[0];
 }
 let selectedSet = null;
+const setName = code => code === MYSTERY ? 'Booster Mystère' : S.sets.find(s => s.code === code)?.name;
+function packHTML(code, o = {}) {
+  if (code === MYSTERY) {
+    const arts = S.sets.map(s => featured(s.code)).filter(Boolean).sort(() => Math.random() - .5).slice(0, 4);
+    return `<div class="pack mystery ${o.selected ? 'selected' : ''}" data-set="${MYSTERY}">
+      <div class="crimp top"></div><div class="num">TOUS LES SETS</div>
+      <div class="art mosaic">${arts.map(f => `<img src="${esc(f.thumb || f.image_path)}" onerror="this.remove()" alt="">`).join('')}<span class="q">?</span></div>
+      <div class="title">Booster Mystère</div><div class="crimp bot"></div></div>`;
+  }
+  const f = featured(code), all = setCards(code), have = all.filter(c => owned(c.id)).length;
+  return `<div class="pack ${o.selected ? 'selected' : ''}" data-set="${esc(code)}" style="--h:${(Number(code) * 47) % 360}">
+    <div class="crimp top"></div><div class="num">SET ${esc(code)}</div>${o.progress === false ? '' : `<span class="prog">${have}/${all.length}</span>`}
+    <div class="art">${f ? `<img src="${esc(f.thumb || f.image_path)}" onerror="this.remove()" alt="">` : '<div class="card-back" style="width:100%;height:100%"></div>'}</div>
+    <div class="title">${esc(setName(code))}</div><div class="crimp bot"></div></div>`;
+}
 
 function renderHome() {
   const p = S.profile;
@@ -112,19 +127,18 @@ function renderHome() {
       </div>
     </div>
     <div class="panel row" style="margin:14px 0">
-      <div><b id="sel-name"></b><div class="muted" style="font-size:.85rem">6 cartes : 3 communes, 2 peu communes, 1 rare ou mieux</div></div>
+      <div><b id="sel-name"></b><div class="muted" style="font-size:.85rem" id="sel-desc"></div></div>
       <span class="spacer"></span>
       <button class="btn gold" id="open-free" ${p.freePacks ? '' : 'disabled'}>🎁 Ouvrir gratuitement</button>
       <button class="btn" id="open-paid" ${p.coins >= p.rules.BOOSTER_PRICE ? '' : 'disabled'}>Ouvrir — ${p.rules.BOOSTER_PRICE} 🪙</button>
     </div>
-    <div class="packs">${S.sets.slice().reverse().map(s => {
-      const f = featured(s.code), all = setCards(s.code), have = all.filter(c => owned(c.id)).length;
-      return `<div class="pack ${s.code === selectedSet ? 'selected' : ''}" data-set="${esc(s.code)}" style="--h:${(Number(s.code) * 47) % 360}">
-        <div class="crimp top"></div><div class="num">SET ${esc(s.code)}</div><span class="prog">${have}/${all.length}</span>
-        <div class="art">${f ? `<img src="${esc(f.thumb || f.image_path)}" onerror="this.remove()" alt="">` : '<div class="card-back" style="width:100%;height:100%"></div>'}</div>
-        <div class="title">${esc(s.name)}</div><div class="crimp bot"></div></div>`;
-    }).join('')}</div>`;
-  const upd = () => { $('#sel-name').textContent = `Booster : ${S.sets.find(s => s.code === selectedSet)?.name}`; };
+    <div class="packs">${[MYSTERY, ...S.sets.slice().reverse().map(s => s.code)].map(code => packHTML(code, { selected: code === selectedSet })).join('')}</div>`;
+  const upd = () => {
+    $('#sel-name').textContent = selectedSet === MYSTERY ? 'Booster Mystère' : `Booster : ${setName(selectedSet)}`;
+    $('#sel-desc').textContent = selectedSet === MYSTERY
+      ? '12 cartes tirées au hasard dans tous les sets : 6 communes, 3 peu communes, 2 rares ou mieux, 1 foil'
+      : '12 cartes : 6 communes, 3 peu communes, 2 rares ou mieux, 1 foil';
+  };
   upd();
   view.querySelectorAll('.pack').forEach(el => el.onclick = () => {
     selectedSet = el.dataset.set; view.querySelectorAll('.pack').forEach(x => x.classList.toggle('selected', x === el)); upd();
@@ -151,26 +165,28 @@ function renderStarter() {
 async function openPack(free) {
   let data;
   try { data = await api('/api/booster', { set: selectedSet, free }); } catch (e) { return toast(e.message); }
-  const set = S.sets.find(s => s.code === selectedSet), f = featured(selectedSet);
+  const mystery = selectedSet === MYSTERY;
   const ov = document.createElement('div');
   ov.className = 'opening';
-  ov.innerHTML = `<div class="pack" style="--h:${(Number(selectedSet) * 47) % 360}"><div class="crimp top"></div><div class="num">SET ${esc(selectedSet)}</div>
-    <div class="art">${f ? `<img src="${esc(f.thumb || f.image_path)}" onerror="this.remove()" alt="">` : '<div class="card-back" style="width:100%;height:100%"></div>'}</div><div class="title">${esc(set.name)}</div><div class="crimp bot"></div></div>
-    <div class="muted">Clique sur le booster pour l'ouvrir</div>`;
+  ov.innerHTML = `${packHTML(selectedSet, { progress: false })}<div class="muted">Clique sur le booster pour l'ouvrir</div>`;
   document.body.appendChild(ov);
-  const order = data.cards; // la carte rare est révélée en dernier
+  const order = data.cards; // ordre de révélation : communes… puis rares, la carte foil en dernier
+  const setTag = c => mystery ? ` · Set ${esc(c.set_code)}` : '';
   let i = -1;
   const next = () => {
     i++;
     if (i >= order.length) return summary();
     const c = S.byId.get(order[i].id);
-    ov.innerHTML = `<div class="rarity-tag" style="color:${['Legendary', 'Epic', 'Enchanted', 'Iconic'].includes(c.rarity) ? 'var(--gold)' : 'var(--muted)'}">${RARITY_FR[c.rarity]}${order[i].foil ? ' · FOIL ✨' : ''}${order[i].isNew ? ' · NOUVELLE !' : ''}</div>
+    ov.innerHTML = `<div class="rarity-tag" style="color:${['Legendary', 'Epic', 'Enchanted', 'Iconic'].includes(c.rarity) ? 'var(--gold)' : 'var(--muted)'}">${RARITY_FR[c.rarity]}${order[i].foil ? ' · FOIL ✨' : ''}${setTag(c)}${order[i].isNew ? ' · NOUVELLE !' : ''}</div>
       <div class="reveal-stack">${cardHTML(c, { full: true, eager: true, foil: order[i].foil, rarityCls: true })}</div>
-      <div class="muted">${i + 1} / ${order.length} — clique pour continuer</div>`;
+      <div class="muted">${i + 1} / ${order.length} — clique pour continuer</div>
+      <button class="btn small" id="skip">Tout révéler ⏭</button>`;
     $('.reveal-stack', ov).onclick = next;
+    $('#skip', ov).onclick = summary;
   };
   const summary = () => {
-    ov.innerHTML = `<h1>Ton booster</h1><div class="summary">${order.map((x, k) => cardHTML(S.byId.get(x.id), { foil: x.foil, attrs: `style="animation-delay:${k * 70}ms"`, extra: x.isNew ? '<span class="badge-new">NOUVEAU</span>' : '' })).join('')}</div>
+    i = order.length;
+    ov.innerHTML = `<h1>${mystery ? 'Ton Booster Mystère' : 'Ton booster'}</h1><div class="summary">${order.map((x, k) => cardHTML(S.byId.get(x.id), { foil: x.foil, attrs: `style="animation-delay:${k * 70}ms"`, extra: (x.isNew ? '<span class="badge-new">NOUVEAU</span>' : '') + (mystery ? `<span class="qty">Set ${esc(S.byId.get(x.id).set_code)}</span>` : '') })).join('')}</div>
       <div class="row"><button class="btn gold" id="again">Encore un</button><button class="btn" id="done">Terminer</button></div>`;
     $('#done', ov).onclick = () => { ov.remove(); renderHome(); };
     const canAgain = S.profile.freePacks > 0 || S.profile.coins >= S.profile.rules.BOOSTER_PRICE;

@@ -13,7 +13,8 @@ La partie est enregistrée dans le navigateur de chaque appareil. Pour la passer
 Ta partie de la première version (avec le serveur local) a été convertie dans `ma-partie-lorcana.json` : importe-la de la même façon.
 
 ## Le jeu
-- **Boosters** : 6 cartes (3 communes, 2 peu communes, 1 rare ou mieux). 2 boosters gratuits, rechargés toutes les 6 h, ou 50 pièces.
+- **Boosters** : comme les vrais, 12 cartes : 6 communes, 3 peu communes, 2 « rare ou mieux » et 1 foil (toutes raretés ; les Épiques, Enchantées et Iconiques ne sortent que là). Le **Booster Mystère** tire chaque carte dans un set au hasard. 2 boosters gratuits, rechargés toutes les 6 h, ou 100 pièces.
+  Taux (estimations de la communauté, Ravensburger ne publie pas de chiffres officiels) : Légendaire ≈ 1 booster sur 4, Épique ≈ 1 sur 25, Enchantée ≈ 1 sur 50, Iconique ≈ 1 sur 200. Réglables dans `jeu/js/store.js` (`ECO`).
 - **Collection** : progression par set, filtres, cartes manquantes en grisé, recyclage des doublons en pièces.
 - **Decks** : format Pocket de 30 cartes, 2 exemplaires et 2 encres au maximum, deck automatique.
 - **Combat** : règles Lorcana simplifiées (encrier, quêtes, défis, chansons, Alter/Shift, mots-clés), IA facile, normale ou difficile. Premier à 20 lore.
