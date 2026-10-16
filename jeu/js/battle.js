@@ -59,6 +59,9 @@ class BattleUI {
 
   boot() {
     this.view.onclick = e => this.click(e);
+    // Échap : refermer la carte agrandie
+    const onKey = e => { if (current !== this) return document.removeEventListener('keydown', onKey); if (e.key === 'Escape' && this.zoom) { this.zoom = false; this.render(); } };
+    document.addEventListener('keydown', onKey);
     this.view.oncontextmenu = e => { const id = e.target.closest('.card')?.dataset.id; if (id) { e.preventDefault(); showCard(id); } };
     this.render();
     if (this.G.active === 1) setTimeout(() => this.runAI(), 900);
@@ -94,6 +97,7 @@ class BattleUI {
   render() {
     if (current !== this) return;
     const G = this.G, me = G.players[0], opp = G.players[1], t = this.targeting;
+    if (t || !this.sel) this.zoom = false;
     const myTurn = G.active === 0 && !G.over;
     const hand = me.hand.map(i => {
       const playable = myTurn && !this.busy && (playOptions(G, 0, i.uid).length || canInk(G, 0, i.uid));
@@ -127,8 +131,42 @@ class BattleUI {
   }
 
   panel() {
+    const p = this.panelParts(); if (!p) return '';
+    const { inst, btns, kw, abil, info } = p;
+    if (this.zoom) return this.zoomView(p);
+    return `<div class="action-panel"><div class="zoomable" data-act="zoom" title="Agrandir la carte">${cardHTML(this.row(inst), { full: true, eager: true })}<span class="zoom-hint">🔍</span></div>
+      <div class="btns">${btns.join('')}
+      ${kw ? `<div class="info">Mots-clés : ${esc(kw)}</div>` : ''}${abil ? `<div class="info">⚡ Capacité active : ${esc(abil)}</div>` : ''}
+      ${info ? `<div class="info">${esc(info)}</div>` : ''}
+      <div class="row" style="gap:6px"><button class="btn small" data-act="zoom" style="flex:1">🔍 Agrandir</button><button class="btn small" data-act="close" style="flex:1">Fermer</button></div></div></div>`;
+  }
+
+  // Carte en grand : visuel, texte lisible, état en jeu et les mêmes actions ; « Retour » revient au plateau
+  zoomView({ inst, zone, btns, kw, abil, info }) {
+    const row = this.row(inst);
+    const where = { hand: 'Dans ta main', play: inst.owner === 0 ? 'En jeu (toi)' : 'En jeu (adversaire)' }[zone] || '';
+    const stats = row.card_type === 'Character'
+      ? `<div class="zstats"><span>⚔ ${strOf(inst)} force</span><span>🛡 ${wilOf(inst) - inst.damage}/${wilOf(inst)} volonté</span><span>◆ ${loreOf(inst)} lore</span><span>💧 coût ${row.cost}</span></div>`
+      : `<div class="zstats"><span>💧 coût ${row.cost}</span></div>`;
+    return `<div class="battle-zoom">
+      <div class="ztop"><button class="btn" data-act="unzoom">← Retour</button><span class="muted">${esc(where)}</span></div>
+      <div class="zbody">
+        <div class="zcard">${cardHTML(row, { full: true, eager: true })}</div>
+        <div class="zinfo">
+          <h2>${esc(row.name)}</h2>${row.version ? `<div class="muted">${esc(row.version)}</div>` : ''}
+          ${stats}
+          ${inst.damage ? `<div class="info" style="color:var(--danger)">${inst.damage} dégât(s) sur ce personnage</div>` : ''}
+          ${row.text ? `<div class="ztext">${esc(row.text)}</div>` : ''}
+          ${kw ? `<div class="info">Mots-clés : ${esc(kw)}</div>` : ''}${abil ? `<div class="info">⚡ Capacité active en combat : ${esc(abil)}</div>` : ''}
+          ${info ? `<div class="info">${esc(info)}</div>` : ''}
+          <div class="zbtns">${btns.join('')}</div>
+        </div>
+      </div></div>`;
+  }
+
+  panelParts() {
     const G = this.G, { uid } = this.sel;
-    const f = findInst(G, uid); if (!f) { this.sel = null; return ''; }
+    const f = findInst(G, uid); if (!f) { this.sel = null; return null; }
     const { inst, zone } = f, mine = inst.owner === 0, myTurn = G.active === 0 && !G.over && !this.busy;
     const btns = [];
     const c = inst.card;
@@ -153,11 +191,7 @@ class BattleUI {
     }
     const kw = Object.entries(c.kw).map(([k, v]) => v === true ? k : `${k} ${v}`).join(', ');
     const abil = c.abilities.map(a => a.label).filter(Boolean).join(', ');
-    return `<div class="action-panel">${cardHTML(this.row(inst), { full: true, eager: true })}
-      <div class="btns">${btns.join('')}
-      ${kw ? `<div class="info">Mots-clés : ${esc(kw)}</div>` : ''}${abil ? `<div class="info">⚡ Capacité active : ${esc(abil)}</div>` : ''}
-      ${info ? `<div class="info">${esc(info)}</div>` : ''}
-      <button class="btn small" data-act="close">Fermer</button></div></div>`;
+    return { inst, zone, btns, kw, abil, info };
   }
 
   click(e) {
@@ -173,13 +207,16 @@ class BattleUI {
       return;
     }
     this.sel = this.sel?.uid === uid ? null : { uid };
+    this.zoom = false;
     this.render();
   }
 
   button(act) {
     const G = this.G;
     switch (act) {
-      case 'close': this.sel = null; return this.render();
+      case 'close': this.sel = null; this.zoom = false; return this.render();
+      case 'zoom': this.zoom = true; return this.render();
+      case 'unzoom': this.zoom = false; return this.render();
       case 'cancel': this.targeting = null; return this.render();
       case 'skip': { const t = this.targeting; this.targeting = null; return t.done(undefined); }
       case 'end': this.sel = null; this.do({ type: 'end' }); return this.runAI();
@@ -214,6 +251,7 @@ class BattleUI {
   }
 
   do(a) {
+    this.zoom = false; // après une action, on revient au plateau pour voir le résultat
     const r = applyAction(this.G, a);
     if (!r.ok) toast(r.error);
     [a.uid, a.target].forEach(u => u != null && this.flash.add(u));
