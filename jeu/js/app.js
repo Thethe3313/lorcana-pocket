@@ -258,7 +258,7 @@ export const deckErrors = ids => validateDeck(ids.map(id => S.byId.get(id)));
 function renderDecks() {
   const decks = S.profile.decks;
   view.innerHTML = `<div class="row"><h1>Mes decks</h1><span class="spacer"></span>
-      <button class="btn" id="auto">✨ Deck automatique</button><button class="btn gold" id="new">+ Nouveau deck</button></div>
+      <button class="btn gold" id="best">🏆 Meilleur deck</button><button class="btn" id="auto">✨ Deck automatique</button><button class="btn" id="new">+ Nouveau deck</button></div>
     <p class="muted">Format Pocket : ${RULES.DECK_SIZE} cartes, ${RULES.MAX_COPIES} exemplaires max par carte, ${RULES.MAX_INKS} encres max. Seuls les personnages et les actions dont l'effet est géré sont jouables.</p>
     <div class="deck-list">${decks.map(d => {
       const errs = deckErrors(d.cards), cover = S.byId.get(d.cards.map(id => S.byId.get(id)).sort((a, b) => b.cost - a.cost)[0]?.id);
@@ -267,6 +267,7 @@ function renderDecks() {
     }).join('') || '<p class="muted">Aucun deck pour l\'instant.</p>'}</div>`;
   $('#new').onclick = () => editDeck({ id: null, name: 'Nouveau deck', cards: [] });
   $('#auto').onclick = autoDeck;
+  $('#best').onclick = renderBestDeck;
   view.querySelectorAll('.deck-tile').forEach(el => el.onclick = () => editDeck(structuredClone(decks.find(d => d.id === +el.dataset.id))));
 }
 
@@ -354,6 +355,86 @@ function editDeck(deck) {
 }
 
 // ---------------------------------------------------------------- Routeur
+
+// ---------------------------------------------------------------- Meilleur deck (recherche par simulation)
+
+const BEST = { inks: new Set(), worker: null };
+function deckListHTML(ids) {
+  const groups = {};
+  for (const id of ids) { const c = S.byId.get(id); (groups[c.full_name] ||= { c, n: 0 }).n++; }
+  const lines = Object.values(groups).sort((a, b) => a.c.cost - b.c.cost || a.c.name.localeCompare(b.c.name));
+  const curve = [1, 2, 3, 4, 5, 6, 7].map(k => ids.filter(id => { const c = S.byId.get(id).cost; return k === 7 ? c >= 7 : c === k; }).length);
+  const max = Math.max(1, ...curve);
+  return `<div class="curve">${curve.map((n, k) => `<div style="height:${n / max * 100}%"><span>${k === 6 ? '7+' : k + 1}</span></div>`).join('')}</div><div style="height:14px"></div>
+    ${lines.map(({ c, n }) => `<div class="deck-line" data-id="${esc(c.id)}"><span class="c">${c.cost}</span><span class="ink-dot" style="background:var(--${c.ink || 'Steel'})"></span><span class="n">${esc(c.full_name)}</span><b>×${n}</b></div>`).join('')}`;
+}
+const inkNames = inks => inks.map(k => INK_FR[k]).join(' / ');
+
+function renderBestDeck() {
+  const have = ownedByName();
+  const legal = [...new Map(S.cards.filter(c => owned(c.id) && c.battle).map(c => [c.full_name, c])).values()];
+  view.innerHTML = `<div class="setup">
+    <div class="row"><button class="btn small" id="back">← Decks</button><h1 style="margin:0">🏆 Meilleur deck</h1></div>
+    <p class="muted">Le jeu cherche le deck le plus fort possible <b>avec tes cartes</b>, tous sets confondus. Il construit un deck pour chaque combinaison d'encres, les fait jouer des milliers de parties simulées contre des decks de référence (IA normale et difficile), puis améliore les meilleurs carte par carte en gardant les échanges qui font gagner plus.
+    Tu as ${legal.length} cartes différentes jouables en combat.</p>
+    <div class="panel"><h2 style="margin-top:0">Encres</h2>
+      <div class="row">${INKS.map(k => `<span class="chip ${BEST.inks.has(k) ? 'on' : ''}" data-ink="${k}" style="cursor:pointer"><span class="ink-dot" style="background:var(--${k})"></span>${INK_FR[k]}</span>`).join('')}</div>
+      <p class="muted" style="margin-bottom:0">${BEST.inks.size ? `Seulement les decks avec ${inkNames([...BEST.inks])}.` : 'Aucune encre choisie : toutes les combinaisons sont testées.'} Tu peux en choisir une ou deux.</p></div>
+    <button class="btn gold" id="go-best" style="font-size:1.1rem;padding:14px">🔎 Lancer la recherche</button>
+    <div id="best-out"></div></div>`;
+  $('#back').onclick = renderDecks;
+  view.querySelectorAll('[data-ink]').forEach(el => el.onclick = () => {
+    const k = el.dataset.ink;
+    if (BEST.inks.has(k)) BEST.inks.delete(k); else { if (BEST.inks.size >= 2) BEST.inks.delete([...BEST.inks][0]); BEST.inks.add(k); }
+    renderBestDeck();
+  });
+  $('#go-best').onclick = () => runBestDeck(legal, have);
+}
+
+function runBestDeck(legal, have) {
+  const out = $('#best-out'), go = $('#go-best');
+  go.disabled = true;
+  out.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><b id="best-step">Préparation…</b><span class="muted" id="best-games"></span></div>
+    <div class="progress" style="margin:10px 0;height:12px"><i id="best-bar" style="width:0%"></i></div>
+    <button class="btn small" id="best-stop">Arrêter et garder le meilleur trouvé</button></div>`;
+  BEST.worker?.terminate();
+  const w = BEST.worker = new Worker(new URL('./optimizer.js', import.meta.url), { type: 'module' });
+  $('#best-stop').onclick = () => { w.postMessage({ type: 'stop' }); $('#best-step').textContent = 'Arrêt en cours…'; };
+  w.onmessage = ({ data }) => {
+    if (!document.body.contains(out)) return w.terminate(); // l'écran a été quitté
+    if (data.type === 'progress') {
+      $('#best-step').textContent = data.text;
+      $('#best-games').textContent = `${data.games.toLocaleString('fr-FR')} parties jouées`;
+      $('#best-bar').style.width = `${Math.round(data.p * 100)}%`;
+      return;
+    }
+    w.terminate(); BEST.worker = null; go.disabled = false;
+    if (data.error) { out.innerHTML = `<div class="panel errs">${esc(data.error)}</div>`; return; }
+    const pct = x => `${Math.round(x * 100)} %`;
+    out.innerHTML = `<div class="panel">
+      <h2 style="margin-top:0">${inkDots(data.inks)} ${esc(inkNames(data.inks))}</h2>
+      <p>Ce deck gagne <b style="color:var(--gold);font-size:1.2rem">${pct(data.rate)}</b> de ses parties contre les decks de référence <span class="muted">(${data.games.toLocaleString('fr-FR')} parties simulées en ${data.seconds} s${data.stopped ? ', recherche arrêtée avant la fin' : ''})</span>.</p>
+      <div class="row"><button class="btn gold" id="best-save">💾 Enregistrer ce deck</button><button class="btn" id="best-again">↻ Relancer</button></div>
+      <div style="margin-top:12px">${deckListHTML(data.ids)}</div>
+      <h2>Les combinaisons d'encres testées</h2>
+      ${data.ranking.slice(0, 8).map(r => `<div class="row" style="gap:8px;margin:4px 0"><span style="width:150px">${inkDots(r.inks)} ${esc(inkNames(r.inks))}</span><div class="progress" style="flex:1"><i style="width:${r.rate * 100}%"></i></div><span class="muted" style="width:44px;text-align:right">${pct(r.rate)}</span></div>`).join('')}
+      <p class="muted" style="font-size:.85rem">Les combinaisons sont d'abord comparées sur un petit nombre de parties, puis les 3 meilleures sont améliorées et départagées : le gagnant n'est donc pas forcément en tête de cette liste.
+      Le calcul suit les règles de ce jeu (les capacités non gérées ne comptent pas) : ce n'est pas forcément le meilleur deck du vrai Lorcana.</p></div>`;
+    out.querySelectorAll('.deck-line').forEach(el => el.onclick = () => showCard(el.dataset.id));
+    $('#best-again').onclick = () => runBestDeck(legal, have);
+    $('#best-save').onclick = async () => {
+      try { await api('/api/deck', { name: `Meilleur deck ${inkNames(data.inks)}`, cards: data.ids }); toast('Deck enregistré ! Il est prêt pour le combat.'); renderDecks(); }
+      catch (e) { toast(e.message); }
+    };
+  };
+  w.onerror = e => { out.innerHTML = `<div class="panel errs">La recherche a échoué : ${esc(e.message || 'erreur inconnue')}</div>`; go.disabled = false; };
+  // Les fiches de cartes sont envoyées au calcul ; un deck utilise seulement des cartes que tu possèdes
+  const strip = c => ({ id: c.id, name: c.name, version: c.version, full_name: c.full_name, types: c.types, keywords: c.keywords, ink: c.ink, inks: c.inks,
+    cost: c.cost, inkwell: c.inkwell, strength: c.strength, willpower: c.willpower, lore: c.lore, rarity: c.rarity, text_en: c.text_en, set_code: c.set_code, collector_number: c.collector_number });
+  w.postMessage({ type: 'start', owned: legal.map(strip), available: have,
+    gauntletPool: S.cards.filter(c => /^\d+$/.test(c.set_code) && c.battle).map(strip), inksFilter: [...BEST.inks],
+    budget: { phase1: 60, phase2: 60, iterations: 50, finalists: 3, final: 200 } });
+}
 
 // ---------------------------------------------------------------- Réglages
 

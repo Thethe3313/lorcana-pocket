@@ -17,13 +17,14 @@ Ta partie de la première version (avec le serveur local) a été convertie dans
   Taux (estimations de la communauté, Ravensburger ne publie pas de chiffres officiels) : Légendaire ≈ 1 booster sur 4, Épique ≈ 1 sur 25, Enchantée ≈ 1 sur 50, Iconique ≈ 1 sur 200. Réglables dans `jeu/js/store.js` (`ECO`).
 - **Collection** : progression par set, filtres, cartes manquantes en grisé, recyclage des doublons en pièces.
 - **Decks** : format Pocket de 30 cartes, 2 exemplaires et 2 encres au maximum, deck automatique.
+  **🏆 Meilleur deck** : cherche le deck le plus fort avec tes cartes, tous sets confondus, en simulant des milliers de parties contre des decks de référence puis en l'améliorant carte par carte (`jeu/js/optimizer.js`, dans un Web Worker).
 - **Combat** : règles Lorcana simplifiées (encrier, quêtes, défis, chansons, Alter/Shift, mots-clés), IA facile, normale ou difficile. Premier à 20 lore.
   Les effets courants (dégâts, pioche, bannissement, soins…) sont appliqués automatiquement à partir du texte officiel anglais ; les autres capacités sont ignorées. Les objets, les lieux et les actions non reconnues ne se jouent pas encore en combat.
 
 ## Le dossier
 | Dossier | Contenu |
 |---|---|
-| `jeu/` | Le jeu publié : `index.html`, `css/`, `js/` (`engine.js` règles et IA, `store.js` sauvegarde et boosters, `app.js` écrans, `battle.js` combat), `data/cards.json` (cartes), icônes, manifeste et service worker. |
+| `jeu/` | Le jeu publié : `index.html`, `css/`, `js/` (`engine.js` règles et IA, `optimizer.js` recherche du meilleur deck, `store.js` sauvegarde et boosters, `app.js` écrans, `battle.js` combat), `data/cards.json` (cartes), icônes, manifeste et service worker. |
 | `scripts/` | `build-jeu-data.mjs` régénère `jeu/data/cards.json` depuis LorcanaJSON (nouveaux sets) ; `serve.mjs` lance le jeu en local (http://localhost:8080) ; `simulate.mjs` fait jouer l'IA contre elle-même pour vérifier le moteur ; `creer-raccourci.ps1`, `creer-icones.ps1`. |
 | `data/`, `images/` | Non publiés : la base SQLite des cartes (`lorcana.db`, avec les textes français) et les visuels HD téléchargés (`import-lorcana.mjs`, `make-thumbs.ps1`). |
 
