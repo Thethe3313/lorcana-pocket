@@ -1,6 +1,7 @@
 import { newGame, applyAction, aiNextAction, playOptions, canInk, canQuest, challengeTargets, pendingTargetEffect, effectTargets,
   inkAvailable, strOf, loreOf, wilOf, findInst, buildDeck, RULES, INKS } from './engine.js';
 import { S, api, cardHTML, esc, toast, showCard, deckErrors, INK_FR } from './app.js';
+import { kwLabel } from './guide.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const DIFF = { easy: 'Facile', normal: 'Normal', hard: 'Difficile' };
@@ -39,8 +40,8 @@ export function renderBattle(view) {
       <li><b>Jouer</b> : paye le coût en encre. Un personnage qui vient d'arriver « sèche » (💤) : il ne peut ni quêter ni défier ce tour (sauf Rush).</li>
       <li><b>Quêter</b> : épuise un personnage pour gagner sa valeur de lore ◆.</li>
       <li><b>Défier</b> : épuise un personnage pour attaquer un personnage adverse <i>épuisé</i>. Chacun inflige sa force ⚔ à l'autre ; un personnage dont les dégâts atteignent sa volonté 🛡 est banni.</li>
-      <li><b>Chansons</b> : un personnage sec de coût suffisant peut s'épuiser pour chanter une chanson gratuitement. <b>Shift</b> : joue une version améliorée par-dessus un personnage du même nom.</li>
-      <li>Mots-clés gérés : Evasive, Rush, Ward, Bodyguard, Reckless, Support, Challenger, Resist, Singer, Shift, Vanish. Les capacités ⚡ s'appliquent automatiquement ; les autres textes sont ignorés.</li>
+      <li><b>Chansons</b> : un personnage sec de coût suffisant peut s'épuiser pour chanter une chanson gratuitement. <b>Alter</b> : joue une version améliorée par-dessus un personnage du même nom.</li>
+      <li>Mots-clés gérés : Insaisissable, Charge, Hors d'atteinte, Rempart, Combattant, Soutien, Offensif, Résistance, Mélomane, Alter, Dissipation. Les capacités ⚡ s'appliquent automatiquement ; les autres textes sont ignorés.</li>
     </ul></details></div>`;
   view.querySelectorAll('[data-deck]').forEach(el => el.onclick = () => { setup.deckId = +el.dataset.deck; renderBattle(view); });
   view.querySelectorAll('[data-diff]').forEach(el => el.onclick = () => { setup.diff = el.dataset.diff; renderBattle(view); });
@@ -85,7 +86,7 @@ class BattleUI {
     const cls = ['slot', inst.exerted && 'exerted', canAct && 'can-act', targetable && 'targetable', targetable && mine && 'friendly',
       this.sel?.uid === inst.uid && 'selected', this.flash.has(inst.uid) && 'flash'].filter(Boolean).join(' ');
     const kw = Object.keys(inst.card.kw).filter(k => !['shift', 'singer', 'singTogether'].includes(k));
-    return `<div class="${cls}" data-uid="${inst.uid}" title="${esc(inst.card.fullName)}${kw.length ? ' — ' + kw.join(', ') : ''}">
+    return `<div class="${cls}" data-uid="${inst.uid}" title="${esc(inst.card.fullName)}${kw.length ? ' — ' + kw.map(k => kwLabel(k, inst.card.kw[k])).join(', ') : ''}">
       ${cardHTML(this.row(inst))}
       ${inst.damage ? `<span class="dmg">-${inst.damage}</span>` : ''}${inst.fresh ? '<span class="zz" title="Sèche : ne peut pas agir ce tour">💤</span>' : ''}
       <div class="chips"><span title="Force">⚔${strOf(inst)}</span><span title="Volonté restante">🛡${wilOf(inst) - inst.damage}</span><span title="Lore">◆${loreOf(inst)}</span></div></div>`;
@@ -184,7 +185,7 @@ class BattleUI {
     if (mine && zone === 'hand' && myTurn) {
       for (const o of playOptions(G, 0, uid)) {
         if (o.mode === 'normal') btns.push(`<button class="btn gold" data-play='${JSON.stringify(o)}'>Jouer (${o.cost} encre)</button>`);
-        if (o.mode === 'shift') btns.push(`<button class="btn" data-play='${JSON.stringify(o)}'>Shift sur ${esc(findInst(G, o.shiftOnto).inst.card.fullName)} (${o.cost})</button>`);
+        if (o.mode === 'shift') btns.push(`<button class="btn" data-play='${JSON.stringify(o)}'>Alter sur ${esc(findInst(G, o.shiftOnto).inst.card.fullName)} (${o.cost})</button>`);
         if (o.mode === 'sing') btns.push(`<button class="btn" data-play='${JSON.stringify(o)}'>🎵 Chanter avec ${esc(findInst(G, o.singer).inst.card.name)}</button>`);
       }
       if (canInk(G, 0, uid)) btns.push(`<button class="btn" data-act="ink">💧 Mettre dans l'encrier</button>`);
@@ -200,7 +201,7 @@ class BattleUI {
       if (inst.fresh) info = 'Ce personnage sèche : il pourra agir au prochain tour' + (c.kw.rush ? ' (Rush : il peut déjà défier).' : '.');
       else if (inst.exerted) info = 'Épuisé : il se redressera au début du tour de son propriétaire.';
     }
-    const kw = Object.entries(c.kw).map(([k, v]) => v === true ? k : `${k} ${v}`).join(', ');
+    const kw = Object.entries(c.kw).filter(([k]) => k !== 'singTogether').map(([k, v]) => kwLabel(k, v)).join(', ');
     const abil = c.abilities.map(a => a.label).filter(Boolean).join(', ');
     return { inst, zone, btns, kw, abil, info };
   }

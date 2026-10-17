@@ -322,3 +322,19 @@ input[type=text], input[type=search], select { background: var(--bg2); color: va
   .battle-zoom .zinfo { flex: none; }
   .action-panel .zoomable .card { --card-w: 110px; }
 }
+
+/* ---------- Guide d'un deck ---------- */
+.modal.guide-mode { align-items: flex-start; }
+.guide { max-width: 760px; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding-bottom: 24px; }
+.guide h1 { margin: 4px 0 0; }
+.guide h2 { margin: 0 0 6px; font-size: 1.15rem; }
+.guide h3 { margin: 14px 0 2px; font-size: .98rem; color: var(--gold); font-family: 'Nunito', sans-serif; }
+.guide p { margin: 4px 0; line-height: 1.45; }
+.guide .guide-top { position: sticky; top: -16px; z-index: 2; background: #05081a; margin: -16px -16px 0; padding: 12px 16px 10px; border-bottom: 1px solid var(--line); }
+.guide-cards { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; --card-w: 76px; }
+.guide-cards .card, .key-card .card { cursor: zoom-in; }
+.guide .combo + .combo { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 4px; }
+.guide .step { border-left: 3px solid var(--gold2); padding: 2px 0 2px 12px; margin: 10px 0; }
+.key-card { display: flex; gap: 12px; align-items: center; margin: 10px 0; --card-w: 70px; }
+.guide ul { margin: 4px 0; padding-left: 20px; line-height: 1.45; }
+.back-guide { position: fixed; top: 12px; left: 16px; z-index: 2; }

@@ -1,6 +1,7 @@
 import { parseCard, validateDeck, buildDeck, RULES, INKS } from './engine.js';
 import { renderBattle, stopBattle } from './battle.js';
 import { localApi, initStore, getLang, MYSTERY } from './store.js';
+import { deckGuide } from './guide.js';
 
 // ---------------------------------------------------------------- État global
 // sets : extensions vendues en boosters (1, 2, 3…) ; allSets : toutes, y compris les quêtes
@@ -48,14 +49,15 @@ export function cardHTML(c, o = {}) {
 const owned = id => { const q = S.profile.collection[id]; return q ? q[0] + q[1] : 0; };
 const ownedFoil = id => S.profile.collection[id]?.[1] || 0;
 
-export function showCard(id) {
+export function showCard(id, onBack = null) {
   const c = S.byId.get(id), pc = parseCard(c);
   const m = $('#modal');
   const active = pc.abilities.map(a => a.label).filter(Boolean);
   const battle = c.card_type === 'Character'
     ? `Oui${active.length ? ` — capacité(s) active(s) : ${esc(active.join(', '))}` : pc.ignoredAbilities ? ' (ses capacités spéciales ne sont pas encore gérées)' : ''}`
     : c.card_type === 'Action' ? (pc.battleLegal ? 'Oui — effet géré automatiquement' : 'Non (effet pas encore géré)') : 'Non (objets et lieux pas encore gérés)';
-  m.innerHTML = `<button class="close-x" aria-label="Fermer">✕</button>
+  m.classList.remove('guide-mode');
+  m.innerHTML = `${onBack ? '<button class="btn back-guide">← Retour au guide</button>' : ''}<button class="close-x" aria-label="Fermer">✕</button>
     <div class="modal-body">
       <div class="tilt">${cardHTML(c, { full: true, foil: ownedFoil(id) > 0, eager: true })}</div>
       <div class="card-info">
@@ -81,9 +83,9 @@ export function showCard(id) {
     const x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
     if (Math.abs(x) < .8 && Math.abs(y) < .8) tilt.style.transform = `rotateY(${x * 18}deg) rotateX(${-y * 18}deg)`;
   };
-  m.onclick = e => { if (e.target === m || e.target.closest('.close-x')) closeModal(); };
+  m.onclick = e => { if (e.target === m || e.target.closest('.close-x') || e.target.closest('.back-guide')) onBack ? onBack() : closeModal(); };
 }
-export function closeModal() { const m = $('#modal'); m.classList.add('hidden'); m.innerHTML = ''; m.onmousemove = null; }
+export function closeModal() { const m = $('#modal'); m.classList.add('hidden'); m.classList.remove('guide-mode'); m.innerHTML = ''; m.onmousemove = null; }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 // ---------------------------------------------------------------- Accueil : deck de départ + boosters
@@ -301,7 +303,7 @@ function editDeck(deck) {
   const pool = [...new Map(ownedRows.map(c => [c.full_name, c])).values()].sort((a, b) => a.cost - b.cost || a.name.localeCompare(b.name));
   const inDeck = fn => deck.cards.filter(id => S.byId.get(id).full_name === fn).length;
   view.innerHTML = `<div class="row"><button class="btn small" id="back">← Decks</button><input type="text" id="dname" value="${esc(deck.name)}" style="flex:1;max-width:320px">
-      <span class="spacer"></span>${deck.id ? '<button class="btn danger small" id="del">Supprimer</button>' : ''}<button class="btn gold" id="save">Enregistrer</button></div>
+      <span class="spacer"></span><button class="btn small" id="guide">📖 Guide</button>${deck.id ? '<button class="btn danger small" id="del">Supprimer</button>' : ''}<button class="btn gold" id="save">Enregistrer</button></div>
     <div class="filters">${INKS.map(k => `<span class="chip" data-ink="${k}"><span class="ink-dot" style="background:var(--${k})"></span>${INK_FR[k]}</span>`).join('')}
       <select id="dcost"><option value="">Tous coûts</option>${[1, 2, 3, 4, 5, 6, 7].map(n => `<option value="${n}">${n === 7 ? '7+' : n}</option>`).join('')}</select>
       <input type="search" id="dq" placeholder="Rechercher…"></div>
@@ -346,6 +348,7 @@ function editDeck(deck) {
   view.querySelectorAll('[data-ink]').forEach(el => el.onclick = () => { DF.inks.has(el.dataset.ink) ? DF.inks.delete(el.dataset.ink) : DF.inks.add(el.dataset.ink); el.classList.toggle('on'); drawPool(); });
   $('#dcost').onchange = e => { DF.cost = e.target.value; drawPool(); };
   $('#dq').oninput = e => { DF.q = e.target.value; drawPool(); };
+  $('#guide').onclick = () => showGuide($('#dname').value || deck.name, deck.cards);
   $('#back').onclick = renderDecks;
   $('#save').onclick = async () => {
     try { const r = await api('/api/deck', { id: deck.id, name: $('#dname').value, cards: deck.cards }); deck.id = r.id; toast('Deck enregistré'); renderDecks(); }
@@ -355,6 +358,59 @@ function editDeck(deck) {
 }
 
 // ---------------------------------------------------------------- Routeur
+
+// ---------------------------------------------------------------- Guide d'un deck
+
+function showGuide(title, ids) {
+  const rows = ids.map(id => S.byId.get(id)).filter(Boolean);
+  const m = $('#modal');
+  if (!rows.length) return toast('Le deck est vide');
+  const g = deckGuide(rows);
+  const byName = new Map(rows.map(r => [r.full_name, r]));
+  const mini = (list, empty = '') => list.length
+    ? `<div class="guide-cards">${list.map(n => byName.get(n)).filter(Boolean).map(r => cardHTML(r, { attrs: 'title="Voir la carte"' })).join('')}</div>`
+    : (empty ? `<p class="muted">${empty}</p>` : '');
+  const miniIds = ids2 => `<div class="guide-cards">${ids2.map(id => S.byId.get(id)).filter(Boolean).map(r => cardHTML(r)).join('')}</div>`;
+  const inks = [...new Set(rows.flatMap(r => r.inks?.length ? r.inks : [r.ink]).filter(Boolean))];
+  m.innerHTML = `<div class="guide">
+    <div class="row guide-top"><button class="btn" id="guide-back">← Retour</button><span class="muted">Guide du deck</span></div>
+    <h1>📖 ${esc(title)}</h1>
+    <div class="muted">${inkDots(inks)} ${esc(inkNames(inks))} · ${g.stats.total} cartes · coût moyen ${g.stats.avgCost.toFixed(1)} · ${g.stats.inkable} encrables</div>
+
+    <section class="panel"><h2>${g.style.icon} Le style du deck : ${esc(g.style.title)}</h2><p>${g.style.text}</p></section>
+
+    <section class="panel"><h2>💧 L'encrier</h2><p>${g.ink.text}</p>
+      <h3>À mettre dans l'encrier en premier</h3><p class="muted">Les cartes les moins utiles en combat : elles servent plus comme encre.</p>${mini(g.ink.first)}
+      <h3>À garder pour les jouer</h3><p class="muted">Tes meilleures cartes : ne les encre pas, sauf si tu n'as vraiment rien d'autre.</p>${mini(g.ink.keep)}
+      ${g.ink.never.length ? `<h3>Impossible à encrer</h3><p class="muted">Ces cartes n'ont pas le symbole d'encre autour de leur coût : elles ne vont jamais dans l'encrier.</p>${mini(g.ink.never)}` : ''}
+    </section>
+
+    <section class="panel"><h2>🔗 Les combos</h2>
+      ${g.combos.length ? g.combos.map(c => `<div class="combo"><h3>${c.icon} ${esc(c.title)}</h3><p>${c.text}</p>${miniIds(c.cards)}</div>`).join('')
+        : '<p class="muted">Pas de combo particulier repéré : ce deck compte sur la qualité de ses personnages. Les cartes avec Alter, les chansons, Soutien ou Rempart créent des combos si tu en ajoutes.</p>'}
+    </section>
+
+    <section class="panel"><h2>🗺 Le plan de jeu</h2>
+      ${g.plan.map(p => `<div class="step"><b>${esc(p.when)}</b><p>${p.text}</p></div>`).join('')}
+    </section>
+
+    <section class="panel"><h2>⭐ Les cartes clés</h2>
+      ${g.keys.map(k => `<div class="key-card">${cardHTML(S.byId.get(k.id))}<div><b>${esc(k.name)}</b> <span class="muted">×${k.n}</span><p>${esc(k.why)}</p></div></div>`).join('')}
+    </section>
+
+    ${g.warnings.length ? `<section class="panel"><h2>⚠️ Points faibles</h2><ul>${g.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></section>` : ''}
+    <p class="muted" style="font-size:.85rem">Conseils calculés à partir des cartes du deck et des règles de ce jeu. Touche une carte pour la lire en grand.</p>
+  </div>`;
+  m.classList.add('guide-mode');
+  m.classList.remove('hidden');
+  m.scrollTop = 0;
+  m.onmousemove = null;
+  m.onclick = e => {
+    if (e.target.id === 'guide-back' || e.target === m) return closeModal();
+    const id = e.target.closest('.card')?.dataset.id;
+    if (id) { const top = m.scrollTop; showCard(id, () => { showGuide(title, ids); m.scrollTop = top; }); }
+  };
+}
 
 // ---------------------------------------------------------------- Meilleur deck (recherche par simulation)
 
@@ -414,7 +470,7 @@ function runBestDeck(legal, have) {
     out.innerHTML = `<div class="panel">
       <h2 style="margin-top:0">${inkDots(data.inks)} ${esc(inkNames(data.inks))}</h2>
       <p>Ce deck gagne <b style="color:var(--gold);font-size:1.2rem">${pct(data.rate)}</b> de ses parties contre les decks de référence <span class="muted">(${data.games.toLocaleString('fr-FR')} parties simulées en ${data.seconds} s${data.stopped ? ', recherche arrêtée avant la fin' : ''})</span>.</p>
-      <div class="row"><button class="btn gold" id="best-save">💾 Enregistrer ce deck</button><button class="btn" id="best-again">↻ Relancer</button></div>
+      <div class="row"><button class="btn gold" id="best-save">💾 Enregistrer ce deck</button><button class="btn" id="best-guide">📖 Comment le jouer</button><button class="btn" id="best-again">↻ Relancer</button></div>
       <div style="margin-top:12px">${deckListHTML(data.ids)}</div>
       <h2>Les combinaisons d'encres testées</h2>
       ${data.ranking.slice(0, 8).map(r => `<div class="row" style="gap:8px;margin:4px 0"><span style="width:150px">${inkDots(r.inks)} ${esc(inkNames(r.inks))}</span><div class="progress" style="flex:1"><i style="width:${r.rate * 100}%"></i></div><span class="muted" style="width:44px;text-align:right">${pct(r.rate)}</span></div>`).join('')}
@@ -422,6 +478,7 @@ function runBestDeck(legal, have) {
       Le calcul suit les règles de ce jeu (les capacités non gérées ne comptent pas) : ce n'est pas forcément le meilleur deck du vrai Lorcana.</p></div>`;
     out.querySelectorAll('.deck-line').forEach(el => el.onclick = () => showCard(el.dataset.id));
     $('#best-again').onclick = () => runBestDeck(legal, have);
+    $('#best-guide').onclick = () => showGuide(`Meilleur deck ${inkNames(data.inks)}`, data.ids);
     $('#best-save').onclick = async () => {
       try { await api('/api/deck', { name: `Meilleur deck ${inkNames(data.inks)}`, cards: data.ids }); toast('Deck enregistré ! Il est prêt pour le combat.'); renderDecks(); }
       catch (e) { toast(e.message); }
