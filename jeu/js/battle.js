@@ -1,9 +1,21 @@
 import { newGame, applyAction, aiNextAction, playOptions, canInk, canQuest, challengeTargets, pendingTargetEffect, effectTargets,
-  inkAvailable, strOf, loreOf, wilOf, findInst, buildDeck, RULES, INKS } from './engine.js';
+  activateOptions, moveOptions, inkAvailable, strOf, loreOf, wilOf, findInst, buildDeck, RULES, INKS } from './engine.js';
 import { S, api, cardHTML, esc, toast, showCard, deckErrors, INK_FR } from './app.js';
 import { kwLabel } from './guide.js';
+import { normalize } from './effects.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
+
+// Nom d'une capacité dans la langue affichée : même ligne dans le texte français que dans le texte anglais
+function abilityName(row, enLine) {
+  const en = normalize(row.text_en || '').split('\n').map(l => l.trim());
+  const idx = en.indexOf(enLine);
+  const line = idx >= 0 ? (row.text || '').split('\n')[idx] : null;
+  if (!line) return null;
+  const toks = line.trim().split(/\s+/), name = [];
+  for (const t of toks) { if (/[a-zà-ÿ{⟳⬡]/.test(t) || /^\d/.test(t) || t === '-' || t === '–') break; name.push(t); }
+  return name.join(' ').replace(/[,:]$/, '') || null;
+}
 const DIFF = { easy: 'Facile', normal: 'Normal', hard: 'Difficile' };
 // Cartes que l'IA peut utiliser selon la difficulté
 const AI_POOL = {
@@ -79,17 +91,40 @@ class BattleUI {
 
   row(inst) { return S.byId.get(inst.card.id); }
 
+  canAct(inst) {
+    const G = this.G;
+    return inst.owner === 0 && !this.busy && !this.targeting && G.active === 0 && !G.over
+      && (canQuest(G, 0, inst.uid) || challengeTargets(G, 0, inst.uid).length > 0 || activateOptions(G, 0, inst.uid).length > 0);
+  }
+
   slot(inst, mine) {
     const G = this.G, t = this.targeting;
-    const canAct = mine && !this.busy && !t && G.active === 0 && (canQuest(G, 0, inst.uid) || challengeTargets(G, 0, inst.uid).length);
+    const canAct = this.canAct(inst);
     const targetable = t?.valid.includes(inst.uid);
-    const cls = ['slot', inst.exerted && 'exerted', canAct && 'can-act', targetable && 'targetable', targetable && mine && 'friendly',
+    const cls = ['slot', inst.card.kind, inst.exerted && 'exerted', canAct && 'can-act', targetable && 'targetable', targetable && mine && 'friendly',
       this.sel?.uid === inst.uid && 'selected', this.flash.has(inst.uid) && 'flash'].filter(Boolean).join(' ');
     const kw = Object.keys(inst.card.kw).filter(k => !['shift', 'singer', 'singTogether'].includes(k));
     return `<div class="${cls}" data-uid="${inst.uid}" title="${esc(inst.card.fullName)}${kw.length ? ' — ' + kw.map(k => kwLabel(k, inst.card.kw[k])).join(', ') : ''}">
       ${cardHTML(this.row(inst))}
       ${inst.damage ? `<span class="dmg">-${inst.damage}</span>` : ''}${inst.fresh ? '<span class="zz" title="Sèche : ne peut pas agir ce tour">💤</span>' : ''}
-      <div class="chips"><span title="Force">⚔${strOf(inst)}</span><span title="Volonté restante">🛡${wilOf(inst) - inst.damage}</span><span title="Lore">◆${loreOf(inst)}</span></div></div>`;
+      ${this.chips(inst)}</div>`;
+  }
+
+  chips(inst) {
+    const G = this.G, k = inst.card.kind;
+    if (k === 'item') return '<div class="chips"><span title="Objet">🧰 objet</span></div>';
+    if (k === 'location') {
+      const here = G.players[inst.owner].play.filter(c => c.at === inst.uid).length;
+      return `<div class="chips"><span title="Lieu">📍</span><span title="Volonté restante">🛡${wilOf(inst) - inst.damage}</span><span title="Lore gagné au début du tour">◆${loreOf(inst)}</span>${here ? `<span title="Personnages ici">👥${here}</span>` : ''}</div>`;
+    }
+    const loc = inst.at ? findInst(G, inst.at)?.inst : null;
+    return `<div class="chips"><span title="Force">⚔${strOf(inst)}</span><span title="Volonté restante">🛡${wilOf(inst) - inst.damage}</span><span title="Lore">◆${loreOf(inst)}</span>${loc ? `<span title="Au lieu ${esc(loc.card.fullName)}">📍</span>` : ''}</div>`;
+  }
+
+  zone(P, mine) {
+    const chars = P.play.map(i => this.slot(i, mine)).join('');
+    const others = [...P.locations, ...P.items].map(i => this.slot(i, mine)).join('');
+    return chars + (chars && others ? '<span class="zone-sep"></span>' : '') + others;
   }
 
   bar(p) {
@@ -116,7 +151,7 @@ class BattleUI {
     }).join('');
     this.view.innerHTML = `<div class="board" style="grid-template-rows:auto 1fr auto 1fr auto auto">
       ${this.bar(1)}
-      <div class="zone">${opp.play.map(i => this.slot(i, false)).join('') || '<span class="muted">Aucun personnage adverse</span>'}</div>
+      <div class="zone">${this.zone(opp, false) || '<span class="muted">Aucune carte adverse en jeu</span>'}</div>
       <div class="mid">
         <span class="turn-banner">${G.over ? 'Fin de partie' : myTurn ? `Ton tour (${Math.ceil(G.turnNumber / 2)})${this.auto ? ' · 🤖 auto' : ''}` : 'Tour de l\'IA…'}</span>
         <div class="log" id="log">${G.log.slice(-8).map(l => `<div>${l.p === 0 ? '🟢' : '🔴'} ${esc(l.text)}</div>`).join('')}</div>
@@ -125,7 +160,7 @@ class BattleUI {
         ${this.auto ? `<button class="btn small" data-act="speed" title="Vitesse du mode auto">${setup.fast ? '⏩ Rapide' : '▶ Normal'}</button>` : ''}
         <button class="btn gold" data-act="end" ${myTurn && !this.busy && !t ? '' : 'disabled'}>Fin du tour ⏭</button>
       </div>
-      <div class="zone">${me.play.map(i => this.slot(i, true)).join('') || '<span class="muted">Joue des personnages depuis ta main</span>'}</div>
+      <div class="zone">${this.zone(me, true) || '<span class="muted">Joue des cartes depuis ta main</span>'}</div>
       ${this.bar(0)}
       <div class="hand">${hand}</div>
     </div>
@@ -148,7 +183,7 @@ class BattleUI {
     if (this.zoom) return this.zoomView(p);
     return `<div class="action-panel"><div class="zoomable" data-act="zoom" title="Agrandir la carte">${cardHTML(this.row(inst), { full: true, eager: true })}<span class="zoom-hint">🔍</span></div>
       <div class="btns">${btns.join('')}
-      ${kw ? `<div class="info">Mots-clés : ${esc(kw)}</div>` : ''}${abil ? `<div class="info">⚡ Capacité active : ${esc(abil)}</div>` : ''}
+      ${kw ? `<div class="info">Mots-clés : ${esc(kw)}</div>` : ''}${abil ? `<div class="info">⚡ ${esc(abil)}</div>` : ''}
       ${info ? `<div class="info">${esc(info)}</div>` : ''}
       <div class="row" style="gap:6px"><button class="btn small" data-act="zoom" style="flex:1">🔍 Agrandir</button><button class="btn small" data-act="close" style="flex:1">Fermer</button></div></div></div>`;
   }
@@ -156,9 +191,10 @@ class BattleUI {
   // Carte en grand : visuel, texte lisible, état en jeu et les mêmes actions ; « Retour » revient au plateau
   zoomView({ inst, zone, btns, kw, abil, info }) {
     const row = this.row(inst);
-    const where = { hand: 'Dans ta main', play: inst.owner === 0 ? 'En jeu (toi)' : 'En jeu (adversaire)' }[zone] || '';
+    const where = { hand: 'Dans ta main', play: inst.owner === 0 ? 'En jeu (toi)' : 'En jeu (adversaire)', items: 'Objet en jeu', locations: 'Lieu en jeu' }[zone] || '';
     const stats = row.card_type === 'Character'
       ? `<div class="zstats"><span>⚔ ${strOf(inst)} force</span><span>🛡 ${wilOf(inst) - inst.damage}/${wilOf(inst)} volonté</span><span>◆ ${loreOf(inst)} lore</span><span>💧 coût ${row.cost}</span></div>`
+      : row.card_type === 'Location' ? `<div class="zstats"><span>🛡 ${wilOf(inst) - inst.damage}/${wilOf(inst)} volonté</span><span>◆ ${loreOf(inst)} lore par tour</span><span>🚶 déplacement ${row.move_cost ?? 0}</span><span>💧 coût ${row.cost}</span></div>`
       : `<div class="zstats"><span>💧 coût ${row.cost}</span></div>`;
     return `<div class="battle-zoom">
       <div class="ztop"><button class="btn" data-act="unzoom">← Retour</button><span class="muted">${esc(where)}</span></div>
@@ -169,7 +205,7 @@ class BattleUI {
           ${stats}
           ${inst.damage ? `<div class="info" style="color:var(--danger)">${inst.damage} dégât(s) sur ce personnage</div>` : ''}
           ${row.text ? `<div class="ztext">${esc(row.text)}</div>` : ''}
-          ${kw ? `<div class="info">Mots-clés : ${esc(kw)}</div>` : ''}${abil ? `<div class="info">⚡ Capacité active en combat : ${esc(abil)}</div>` : ''}
+          ${kw ? `<div class="info">Mots-clés : ${esc(kw)}</div>` : ''}${abil ? `<div class="info">⚡ ${esc(abil)}</div>` : ''}
           ${info ? `<div class="info">${esc(info)}</div>` : ''}
           <div class="zbtns">${btns.join('')}</div>
         </div>
@@ -187,28 +223,43 @@ class BattleUI {
         if (o.mode === 'normal') btns.push(`<button class="btn gold" data-play='${JSON.stringify(o)}'>Jouer (${o.cost} encre)</button>`);
         if (o.mode === 'shift') btns.push(`<button class="btn" data-play='${JSON.stringify(o)}'>Alter sur ${esc(findInst(G, o.shiftOnto).inst.card.fullName)} (${o.cost})</button>`);
         if (o.mode === 'sing') btns.push(`<button class="btn" data-play='${JSON.stringify(o)}'>🎵 Chanter avec ${esc(findInst(G, o.singer).inst.card.name)}</button>`);
+        if (o.mode === 'singTogether') btns.push(`<button class="btn" data-play='${JSON.stringify(o)}'>🎵 Chanter à l'unisson (${esc(o.singers.map(u => findInst(G, u).inst.card.name).join(', '))})</button>`);
       }
       if (canInk(G, 0, uid)) btns.push(`<button class="btn" data-act="ink">💧 Mettre dans l'encrier</button>`);
     }
     if (mine && zone === 'play' && myTurn) {
       if (canQuest(G, 0, uid)) btns.push(`<button class="btn gold" data-act="quest">◆ Quêter (+${loreOf(inst)} lore)</button>`);
       if (challengeTargets(G, 0, uid).length) btns.push(`<button class="btn" data-act="challenge">⚔ Défier…</button>`);
+      for (const o of moveOptions(G, 0, uid)) btns.push(`<button class="btn" data-move="${o.location}">📍 Aller à ${esc(findInst(G, o.location).inst.card.name)} (${o.cost ? o.cost + ' encre' : 'gratuit'})</button>`);
+    }
+    if (mine && ['play', 'items', 'locations'].includes(zone) && myTurn) {
+      for (const o of activateOptions(G, 0, uid)) {
+        const cost = [o.cost.exert && '⟳', o.cost.ink && `${o.cost.ink} encre`, o.cost.banish && 'bannir la carte', o.cost.banishItem && 'bannir un objet', o.cost.discard && 'défausser une carte'].filter(Boolean).join(', ');
+        btns.push(`<button class="btn" data-ab="${o.index}">⚡ ${esc(abilityName(this.row(inst), o.text) || o.label || 'Utiliser')} (${cost})</button>`);
+      }
     }
     let info = '';
     if (zone === 'hand' && !c.battleLegal) info = 'Effet non géré en combat : cette carte ne peut servir que d\'encre.';
     else if (zone === 'hand' && !c.inkable) info = 'Cette carte ne peut pas aller dans l\'encrier.';
     if (zone === 'play') {
-      if (inst.fresh) info = 'Ce personnage sèche : il pourra agir au prochain tour' + (c.kw.rush ? ' (Rush : il peut déjà défier).' : '.');
+      if (inst.fresh) info = 'Ce personnage sèche : il pourra agir au prochain tour' + (c.kw.rush ? ' (Charge : il peut déjà défier).' : '.');
       else if (inst.exerted) info = 'Épuisé : il se redressera au début du tour de son propriétaire.';
+      if (inst.at) info += ` Il se trouve au lieu ${findInst(G, inst.at)?.inst.card.fullName}.`;
     }
+    if (zone === 'locations') info = `Lieu : rapporte ${loreOf(inst)} lore au début du tour de son propriétaire. Déplacer un personnage ici coûte ${c.moveCost} encre. On peut le défier pour le détruire (il ne rend pas les coups).`;
+    if (zone === 'items') info = inst.exerted ? 'Objet épuisé : il se redressera au prochain tour.' : 'Objet : ses capacités ⟳ s\'utilisent tout de suite, même le tour où il est joué.';
     const kw = Object.entries(c.kw).filter(([k]) => k !== 'singTogether').map(([k, v]) => kwLabel(k, v)).join(', ');
-    const abil = c.abilities.map(a => a.label).filter(Boolean).join(', ');
+    const total = c.abilities.length + c.unhandled;
+    const abil = !total ? '' : c.unhandled ? `${c.abilities.length} capacité(s) sur ${total} appliquée(s) en combat` : `Capacité(s) appliquée(s) en combat ✔`;
     return { inst, zone, btns, kw, abil, info };
   }
 
   click(e) {
     const G = this.G;
     const actBtn = e.target.closest('[data-act]'), playBtn = e.target.closest('[data-play]');
+    const abBtn = e.target.closest('[data-ab]'), moveBtn = e.target.closest('[data-move]');
+    if (abBtn) return this.activate(+abBtn.dataset.ab);
+    if (moveBtn) return this.do({ type: 'move', uid: this.sel.uid, target: +moveBtn.dataset.move });
     if (actBtn) return this.button(actBtn.dataset.act);
     if (playBtn) return this.play(JSON.parse(playBtn.dataset.play));
     const el = e.target.closest('[data-uid]');
@@ -248,7 +299,7 @@ class BattleUI {
       }
       case 'challenge': {
         const uid = this.sel.uid;
-        this.targeting = { prompt: 'Choisis un personnage adverse épuisé à défier', valid: challengeTargets(G, 0, uid), optional: false, done: target => this.do({ type: 'challenge', uid, target }) };
+        this.targeting = { prompt: 'Choisis un personnage adverse épuisé (ou un lieu) à défier', valid: challengeTargets(G, 0, uid), optional: false, done: target => this.do({ type: 'challenge', uid, target }) };
         return this.render();
       }
     }
@@ -259,11 +310,20 @@ class BattleUI {
     this.withTarget(pendingTargetEffect(card, 'play'), target => this.do({ type: 'play', uid, ...o, target }));
   }
 
-  withTarget(eff, done) {
-    const valid = eff ? effectTargets(this.G, 0, eff) : [];
+  activate(index) {
+    const uid = this.sel.uid, card = findInst(this.G, uid).inst.card;
+    this.withTarget(pendingTargetEffect(card, 'activate', index), target => this.do({ type: 'activate', uid, index, target }), uid);
+  }
+
+  withTarget(eff, done, srcUid = null) {
+    const valid = eff ? effectTargets(this.G, 0, eff, srcUid) : [];
     if (!eff || !valid.length) return done(undefined);
-    const what = { damage: `infliger ${eff.amount} dégât(s)`, banish: 'bannir', return: 'renvoyer en main', exert: 'épuiser', heal: 'soigner', buffStr: `${eff.amount > 0 ? '+' : ''}${eff.amount} force`, buffLore: `+${eff.amount} lore`, grant: `donner ${eff.grants?.join(' et ')}`, ready: 'redresser' }[eff.kind] || 'cibler';
-    this.targeting = { prompt: `Choisis un personnage : ${what}`, valid, optional: eff.optional, done };
+    const mods = (eff.mods || []).map(([st, n]) => `${n > 0 ? '+' : ''}${n} ${{ str: 'force', wil: 'volonté', lore: 'lore' }[st]}`).join(', ');
+    const what = { damage: `infliger ${eff.n === 'selfStr' ? 'des' : eff.n} dégât(s)`, banish: 'bannir', return: 'renvoyer en main', toInk: 'mettre dans l\'encrier', tuck: 'remettre sous le deck',
+      exert: 'épuiser', ready: 'redresser', heal: 'soigner', mod: mods, grant: `donner ${(eff.kws || []).map(g => g.kw).join(' et ')}`,
+      restrict: 'empêcher d\'agir', moveDamage: 'déplacer des dégâts' }[eff.k] || 'cibler';
+    const noun = (eff.t?.types || ['character']).map(t => ({ character: 'un personnage', item: 'un objet', location: 'un lieu' }[t])).join(' ou ');
+    this.targeting = { prompt: `Choisis ${noun} : ${what}`, valid, optional: !!eff.opt, done };
     this.sel = null;
     this.render();
   }
@@ -275,7 +335,7 @@ class BattleUI {
     [a.uid, a.target].forEach(u => u != null && this.flash.add(u));
     // on garde la sélection seulement si le personnage peut encore agir
     const still = a.uid != null && findInst(this.G, a.uid);
-    if (!still || still.zone !== 'play' || (!canQuest(this.G, 0, a.uid) && !challengeTargets(this.G, 0, a.uid).length)) this.sel = null;
+    if (!still || !['play', 'items', 'locations'].includes(still.zone) || !this.canAct(still.inst)) this.sel = null;
     this.render();
     this.checkEnd();
   }

@@ -6,7 +6,10 @@ const KEY = 'lorcana-pocket-sauvegarde';
 export const ECO = {
   BOOSTER_PRICE: 100, FREE_PACK_HOURS: 6, FREE_PACK_MAX: 2, START_COINS: 200,
   WIN_REWARD: { easy: 50, normal: 80, hard: 130 }, LOSS_REWARD: 20,
-  RECYCLE_VALUE: { Common: 2, Uncommon: 4, Rare: 8, Super_rare: 15, Legendary: 30, Epic: 40, Enchanted: 60, Iconic: 80, Promo: 5 },
+  // Prix d'achat d'une carte à l'unité : prix du marché (1 $ = 20 pièces, un booster à 100 pièces valant environ 5 $),
+  // avec un minimum selon la rareté ; sans prix connu, le prix de base de la rareté. Revente : 20 % du prix d'achat.
+  PRICE_MIN: { Common: 10, Uncommon: 20, Rare: 40, Super_rare: 80, Legendary: 200, Epic: 400, Enchanted: 1000, Iconic: 2500, Promo: 100 },
+  USD_TO_COINS: 20, PRICE_MAX: 5000, SELL_RATIO: 0.2,
   // Taux de tirage (en %) d'après les estimations de la communauté (Ravensburger ne publie pas de chiffres officiels) :
   // Légendaire ≈ 1 booster sur 4, Épique ≈ 1 par boîte de 24, Enchantée ≈ 1 booster sur 50, Iconique ≈ 1 sur 200.
   // Les deux emplacements « rare ou mieux » (cartes non foil) :
@@ -15,6 +18,14 @@ export const ECO = {
   FOIL_SLOT: { Common: 44, Uncommon: 25, Rare: 15, Super_rare: 7, Legendary: 2.5, Epic: 4, Enchanted: 2, Iconic: 0.5 },
 };
 export const MYSTERY = 'mystere';
+
+/** Prix en pièces d'une carte (achat à l'unité). */
+export function cardPrice(c) {
+  const min = ECO.PRICE_MIN[c.rarity] || 20;
+  const market = c.usd ? Math.round(c.usd * ECO.USD_TO_COINS / 5) * 5 : 0;
+  return Math.min(ECO.PRICE_MAX, Math.max(min, market));
+}
+export const sellPrice = c => Math.max(1, Math.round(cardPrice(c) * ECO.SELL_RATIO));
 const RARITY_ORDER = ['Common', 'Uncommon', 'Rare', 'Super_rare', 'Legendary', 'Epic', 'Enchanted', 'Iconic'];
 export const STARTERS = [['Amber', 'Amethyst'], ['Ruby', 'Sapphire'], ['Emerald', 'Steel']];
 
@@ -193,11 +204,20 @@ const routes = {
     let coins = 0, count = 0;
     for (const [id, q] of Object.entries(p.collection)) if (q[0] > RULES.MAX_COPIES) {
       const extra = q[0] - RULES.MAX_COPIES;
-      coins += extra * (ECO.RECYCLE_VALUE[byId.get(id)?.rarity] || 2); count += extra;
+      coins += extra * (byId.get(id) ? sellPrice(byId.get(id)) : 2); count += extra;
       q[0] = RULES.MAX_COPIES;
     }
     p.coins += coins; persist();
     return { coins, count, profile: profile() };
+  },
+
+  '/api/buy': ({ id }) => {
+    const p = load(), c = byId.get(id);
+    if (!c || !boosterSets.includes(c.set_code) && c.rarity === 'Promo') throw new Error('Carte introuvable');
+    const price = cardPrice(c);
+    if (p.coins < price) throw new Error(`Pas assez de pièces : il en faut ${price}`);
+    p.coins -= price; addCard(id, false); persist();
+    return { price, profile: profile() };
   },
 
   '/api/settings': ({ name, lang }) => {

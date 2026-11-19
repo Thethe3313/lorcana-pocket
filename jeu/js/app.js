@@ -1,6 +1,6 @@
 import { parseCard, validateDeck, buildDeck, RULES, INKS } from './engine.js';
 import { renderBattle, stopBattle } from './battle.js';
-import { localApi, initStore, getLang, MYSTERY } from './store.js';
+import { localApi, initStore, getLang, MYSTERY, cardPrice, sellPrice } from './store.js';
 import { deckGuide } from './guide.js';
 
 // ---------------------------------------------------------------- État global
@@ -49,13 +49,14 @@ export function cardHTML(c, o = {}) {
 const owned = id => { const q = S.profile.collection[id]; return q ? q[0] + q[1] : 0; };
 const ownedFoil = id => S.profile.collection[id]?.[1] || 0;
 
-export function showCard(id, onBack = null) {
+export function showCard(id, onBack = null, onChange = null) {
   const c = S.byId.get(id), pc = parseCard(c);
   const m = $('#modal');
-  const active = pc.abilities.map(a => a.label).filter(Boolean);
-  const battle = c.card_type === 'Character'
-    ? `Oui${active.length ? ` — capacité(s) active(s) : ${esc(active.join(', '))}` : pc.ignoredAbilities ? ' (ses capacités spéciales ne sont pas encore gérées)' : ''}`
-    : c.card_type === 'Action' ? (pc.battleLegal ? 'Oui — effet géré automatiquement' : 'Non (effet pas encore géré)') : 'Non (objets et lieux pas encore gérés)';
+  const applied = pc.abilities.length, total = applied + pc.unhandled;
+  const battle = !pc.battleLegal ? 'Non — son effet n\'est pas encore géré par le jeu'
+    : !total ? 'Oui — pas de capacité spéciale'
+    : pc.fullyHandled ? `Oui — ${total > 1 ? `ses ${total} capacités sont appliquées` : 'sa capacité est appliquée'} ✔`
+    : `Oui — ${applied} capacité(s) sur ${total} appliquée(s) ; les autres sont ignorées`;
   m.classList.remove('guide-mode');
   m.innerHTML = `${onBack ? '<button class="btn back-guide">← Retour au guide</button>' : ''}<button class="close-x" aria-label="Fermer">✕</button>
     <div class="modal-body">
@@ -71,7 +72,9 @@ export function showCard(id, onBack = null) {
           <span>Set</span><span>${esc(S.allSets.find(s => s.code === c.set_code)?.name || c.set_code)} · n°${esc(c.collector_number)}</span>
           <span>Possédée</span><span>${owned(id)} ${ownedFoil(id) ? `(dont ${ownedFoil(id)} foil)` : ''}</span>
           <span>En combat</span><span>${battle}</span>
+          <span>Prix</span><span>🪙 ${cardPrice(c)}${c.usd ? ` <span class="muted">(cote ${c.usd.toFixed(2)} $)</span>` : ''} · revente 🪙 ${sellPrice(c)}</span>
         </div>
+        <div class="row" style="margin-bottom:10px"><button class="btn gold" id="buy" ${S.profile.coins >= cardPrice(c) ? '' : 'disabled'}>🛒 Acheter (🪙 ${cardPrice(c)})</button><span class="muted" style="font-size:.85rem">Tu as 🪙 ${S.profile.coins}</span></div>
         ${c.text ? `<div class="txt">${esc(c.text)}</div>` : ''}
         ${c.flavor_text ? `<p class="muted"><i>${esc(c.flavor_text)}</i></p>` : ''}
       </div>
@@ -83,7 +86,14 @@ export function showCard(id, onBack = null) {
     const x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
     if (Math.abs(x) < .8 && Math.abs(y) < .8) tilt.style.transform = `rotateY(${x * 18}deg) rotateX(${-y * 18}deg)`;
   };
-  m.onclick = e => { if (e.target === m || e.target.closest('.close-x') || e.target.closest('.back-guide')) onBack ? onBack() : closeModal(); };
+  m.onclick = async e => {
+    if (e.target.id === 'buy') {
+      try { await api('/api/buy', { id }); toast(`${c.name} ajoutée à ta collection (−${cardPrice(c)} 🪙)`); showCard(id, onBack, onChange); onChange?.(); }
+      catch (err) { toast(err.message); }
+      return;
+    }
+    if (e.target === m || e.target.closest('.close-x') || e.target.closest('.back-guide')) onBack ? onBack() : closeModal();
+  };
 }
 export function closeModal() { const m = $('#modal'); m.classList.add('hidden'); m.classList.remove('guide-mode'); m.innerHTML = ''; m.onmousemove = null; }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
@@ -201,47 +211,96 @@ async function openPack(free) {
 
 // ---------------------------------------------------------------- Collection
 
-const F = { set: null, inks: new Set(), rarity: '', type: '', owned: 'all', q: '' };
+const F_DEFAULT = { set: 'all', inks: [], rarity: '', type: '', cost: '', owned: 'all', battle: false, q: '', sort: 'number' };
+const F = (() => { try { return { ...F_DEFAULT, ...JSON.parse(localStorage.getItem('lorcana-filtres') || '{}') }; } catch { return { ...F_DEFAULT }; } })();
+const saveF = () => { try { localStorage.setItem('lorcana-filtres', JSON.stringify(F)); } catch { /* stockage indisponible */ } };
+const PAGE = 120;
+const RARITY_RANK = Object.fromEntries(RARITIES.map((r, i) => [r, i]));
+// recherche sans accents ni majuscules
+const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+const activeFilters = () => (F.inks.length ? 1 : 0) + [F.rarity, F.type, F.cost, F.battle, F.owned !== 'all', F.sort !== 'number'].filter(Boolean).length;
+
 function renderCollection() {
-  F.set ??= S.sets[0]?.code;
   const p = S.profile;
   const totalUniq = Object.keys(p.collection).length;
+  let shown = PAGE;
+  const sel = (id, opts, cur) => `<select id="${id}">${opts.map(([v, n]) => `<option value="${esc(v)}" ${String(cur) === String(v) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
   view.innerHTML = `
     <div class="row"><h1>Collection</h1><span class="spacer"></span>
-      <span class="muted">${totalUniq} / ${S.cards.length} cartes uniques</span>
-      <button class="btn small" id="recycle" title="Échange les exemplaires au-delà de ${RULES.MAX_COPIES} contre des pièces (foils conservés)">♻ Recycler les doublons</button></div>
-    <div class="set-tabs" id="set-tabs">${[...S.sets.map(s => [s.code, `${s.code}. ${s.name}`]), ['promo', 'Quêtes des Illumineurs'], ['all', 'Tout']].map(([k, n]) => `<span class="chip ${F.set === k ? 'on' : ''}" data-set="${esc(k)}">${esc(n)}</span>`).join('')}</div>
-    <div id="set-progress" style="margin:10px 0"></div>
-    <div class="filters">
-      ${INKS.map(k => `<span class="chip ${F.inks.has(k) ? 'on' : ''}" data-ink="${k}"><span class="ink-dot" style="background:var(--${k})"></span>${INK_FR[k]}</span>`).join('')}
-      <select id="f-type"><option value="">Tous types</option>${Object.entries(TYPE_FR).map(([k, v]) => `<option value="${k}" ${F.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
-      <select id="f-rar"><option value="">Toutes raretés</option>${RARITIES.map(r => `<option value="${r}" ${F.rarity === r ? 'selected' : ''}>${RARITY_FR[r]}</option>`).join('')}</select>
-      <select id="f-own"><option value="all">Toutes</option><option value="owned" ${F.owned === 'owned' ? 'selected' : ''}>Possédées</option><option value="missing" ${F.owned === 'missing' ? 'selected' : ''}>Manquantes</option></select>
-      <input type="search" id="f-q" placeholder="Rechercher…" value="${esc(F.q)}">
+      <span class="muted">${totalUniq} / ${S.cards.length} cartes différentes</span>
+      <button class="btn small" id="recycle" title="Revend les exemplaires au-delà de ${RULES.MAX_COPIES} (foils conservés)">♻ Revendre les doublons</button></div>
+    <div class="search-bar">
+      <input type="search" id="f-q" placeholder="🔎 Chercher une carte (nom, texte…)" value="${esc(F.q)}" autocomplete="off">
+      ${sel('f-set', [['all', 'Tous les sets'], ...S.sets.map(s => [s.code, `${s.code}. ${s.name}`]), ['promo', 'Quêtes des Illumineurs']], F.set)}
     </div>
-    <div class="card-grid" id="grid"></div>`;
+    <details class="filter-box" ${innerWidth > 600 ? 'open' : ''}><summary>Filtres et tri${activeFilters() ? ` (${activeFilters()} actif${activeFilters() > 1 ? 's' : ''})` : ''}</summary>
+    <div class="filters">
+      ${INKS.map(k => `<span class="chip ${F.inks.includes(k) ? 'on' : ''}" data-ink="${k}"><span class="ink-dot" style="background:var(--${k})"></span>${INK_FR[k]}</span>`).join('')}
+    </div>
+    <div class="filters">
+      ${sel('f-type', [['', 'Tous types'], ...Object.entries(TYPE_FR)], F.type)}
+      ${sel('f-rar', [['', 'Toutes raretés'], ...RARITIES.map(r => [r, RARITY_FR[r]])], F.rarity)}
+      ${sel('f-cost', [['', 'Tous coûts'], ...[1, 2, 3, 4, 5, 6].map(n => [n, `Coût ${n}`]), [7, 'Coût 7 et +']], F.cost)}
+      ${sel('f-own', [['all', 'Possédées et manquantes'], ['owned', 'Possédées'], ['missing', 'Manquantes'], ['dupes', `Doublons (plus de ${RULES.MAX_COPIES})`]], F.owned)}
+      ${sel('f-sort', [['number', 'Tri : set et numéro'], ['name', 'Tri : nom'], ['cost', 'Tri : coût'], ['rarity', 'Tri : rareté'], ['price-desc', 'Tri : prix décroissant'], ['price-asc', 'Tri : prix croissant']], F.sort)}
+      <label class="chip ${F.battle ? 'on' : ''}" id="f-battle-l"><input type="checkbox" id="f-battle" ${F.battle ? 'checked' : ''} hidden>⚔ Jouables en combat</label>
+      <button class="btn small" id="f-reset">Effacer les filtres</button>
+    </div></details>
+    <div id="set-progress" style="margin:4px 0 10px"></div>
+    <div class="card-grid" id="grid"></div>
+    <div id="more" style="text-align:center;margin:16px 0"></div>`;
+
   const draw = () => {
     const inSet = c => F.set === 'all' ? true : F.set === 'promo' ? !/^\d+$/.test(c.set_code) : c.set_code === F.set;
     const base = S.cards.filter(inSet);
     const have = base.filter(c => owned(c.id)).length;
-    $('#set-progress').innerHTML = `<div class="row" style="justify-content:space-between"><span class="muted">Progression</span><b>${have} / ${base.length}</b></div><div class="progress"><i style="width:${base.length ? have / base.length * 100 : 0}%"></i></div>`;
-    const q = F.q.toLowerCase();
-    const list = base.filter(c => (!F.inks.size || (c.inks?.length ? c.inks : [c.ink]).some(i => F.inks.has(i)))
+    const setLabel = F.set === 'all' ? 'Toute la collection' : F.set === 'promo' ? 'Quêtes des Illumineurs' : S.sets.find(s => s.code === F.set)?.name;
+    $('#set-progress').innerHTML = `<div class="row" style="justify-content:space-between"><span class="muted">${esc(setLabel)}</span><b>${have} / ${base.length}</b></div><div class="progress"><i style="width:${base.length ? have / base.length * 100 : 0}%"></i></div>`;
+    const q = fold(F.q.trim());
+    const list = base.filter(c => (!F.inks.length || (c.inks?.length ? c.inks : [c.ink]).some(i => F.inks.includes(i)))
       && (!F.rarity || c.rarity === F.rarity) && (!F.type || c.card_type === F.type)
-      && (F.owned === 'all' || (F.owned === 'owned') === owned(c.id) > 0)
-      && (!q || `${c.full_name} ${c.text || ''}`.toLowerCase().includes(q)));
-    $('#grid').innerHTML = list.length ? list.map(c => cardHTML(c, { unowned: !owned(c.id), foil: ownedFoil(c.id) > 0, extra: owned(c.id) ? `<span class="qty">×${owned(c.id)}</span>` : '' })).join('') : '<p class="muted">Aucune carte.</p>';
+      && (!F.cost || (+F.cost === 7 ? c.cost >= 7 : c.cost === +F.cost))
+      && (F.owned === 'all' || (F.owned === 'owned' ? owned(c.id) > 0 : F.owned === 'missing' ? !owned(c.id) : (S.profile.collection[c.id]?.[0] || 0) > RULES.MAX_COPIES))
+      && (!F.battle || c.battle)
+      && (!q || fold(`${c.full_name} ${c.full_name_en} ${c.text || ''} ${(c.classifications || []).join(' ')}`).includes(q)));
+    const price = c => cardPrice(c);
+    const sorters = {
+      number: null,
+      name: (a, b) => a.full_name.localeCompare(b.full_name, 'fr'),
+      cost: (a, b) => (a.cost ?? 0) - (b.cost ?? 0) || a.full_name.localeCompare(b.full_name, 'fr'),
+      rarity: (a, b) => RARITY_RANK[b.rarity] - RARITY_RANK[a.rarity] || a.full_name.localeCompare(b.full_name, 'fr'),
+      'price-desc': (a, b) => price(b) - price(a),
+      'price-asc': (a, b) => price(a) - price(b),
+    };
+    if (sorters[F.sort]) list.sort(sorters[F.sort]);
+    const page = list.slice(0, shown);
+    $('#grid').innerHTML = page.length ? page.map(c => {
+      const n = owned(c.id);
+      return cardHTML(c, { unowned: !n, foil: ownedFoil(c.id) > 0,
+        extra: n ? `<span class="qty">×${n}</span>` : `<span class="price-tag">🪙 ${price(c)}</span>` });
+    }).join('') : '<p class="muted">Aucune carte ne correspond. Essaie d\'effacer des filtres.</p>';
+    $('#more').innerHTML = `<span class="muted">${list.length} carte(s)</span>${list.length > shown ? ` <button class="btn small" id="more-btn">Afficher plus (${Math.min(PAGE, list.length - shown)})</button>` : ''}`;
+    const mb = $('#more-btn'); if (mb) mb.onclick = () => { shown += PAGE; draw(); };
   };
+  const redraw = () => { shown = PAGE; saveF(); draw(); };
   draw();
-  $('#set-tabs').onclick = e => { const k = e.target.closest('[data-set]')?.dataset.set; if (k) { F.set = k; renderCollection(); } };
-  view.querySelectorAll('[data-ink]').forEach(el => el.onclick = () => { F.inks.has(el.dataset.ink) ? F.inks.delete(el.dataset.ink) : F.inks.add(el.dataset.ink); el.classList.toggle('on'); draw(); });
-  $('#f-type').onchange = e => { F.type = e.target.value; draw(); };
-  $('#f-rar').onchange = e => { F.rarity = e.target.value; draw(); };
-  $('#f-own').onchange = e => { F.owned = e.target.value; draw(); };
-  $('#f-q').oninput = e => { F.q = e.target.value; draw(); };
-  $('#grid').onclick = e => { const id = e.target.closest('.card')?.dataset.id; if (id) showCard(id); };
+  let t;
+  $('#f-q').oninput = e => { F.q = e.target.value; clearTimeout(t); t = setTimeout(redraw, 150); };
+  $('#f-set').onchange = e => { F.set = e.target.value; redraw(); };
+  $('#f-type').onchange = e => { F.type = e.target.value; redraw(); };
+  $('#f-rar').onchange = e => { F.rarity = e.target.value; redraw(); };
+  $('#f-cost').onchange = e => { F.cost = e.target.value; redraw(); };
+  $('#f-own').onchange = e => { F.owned = e.target.value; redraw(); };
+  $('#f-sort').onchange = e => { F.sort = e.target.value; redraw(); };
+  $('#f-battle').onchange = e => { F.battle = e.target.checked; $('#f-battle-l').classList.toggle('on', F.battle); redraw(); };
+  view.querySelectorAll('[data-ink]').forEach(el => el.onclick = () => {
+    const k = el.dataset.ink; F.inks = F.inks.includes(k) ? F.inks.filter(x => x !== k) : [...F.inks, k]; el.classList.toggle('on'); redraw();
+  });
+  $('#f-reset').onclick = () => { Object.assign(F, F_DEFAULT, { inks: [] }); saveF(); renderCollection(); };
+  $('#grid').onclick = e => { const id = e.target.closest('.card')?.dataset.id; if (id) showCard(id, null, draw); };
   $('#recycle').onclick = async () => {
-    try { const r = await api('/api/recycle', {}); toast(r.count ? `${r.count} doublon(s) recyclé(s) : +${r.coins} 🪙` : 'Aucun doublon à recycler'); draw(); }
+    try { const r = await api('/api/recycle', {}); toast(r.count ? `${r.count} doublon(s) revendu(s) : +${r.coins} 🪙` : 'Aucun doublon à revendre'); draw(); }
     catch (e) { toast(e.message); }
   };
 }
@@ -586,7 +645,7 @@ window.addEventListener('hashchange', route);
   document.documentElement.lang = S.lang;
   initStore(S.cards, S.allSets);
   await api('/api/profile');
-  if (S.profile.notice) showNotice(S.profile.notice);
   route();
+  if (S.profile.notice) showNotice(S.profile.notice);
   setInterval(async () => { if (!document.body.classList.contains('in-battle')) await api('/api/profile').catch(() => {}); }, 60000);
 })();

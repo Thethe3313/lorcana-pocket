@@ -55,6 +55,22 @@ const cards = en.cards.map(e => {
   });
   return card;
 });
+// Prix du marché (USD, source Lorcast) repris de la base SQLite, par set + numéro
+const dbFile = join(ROOT, 'data', 'lorcana.db');
+if (existsSync(dbFile)) {
+  const { DatabaseSync } = await import('node:sqlite');
+  const pdb = new DatabaseSync(dbFile, { readOnly: true });
+  const prices = new Map(pdb.prepare('SELECT set_code, collector_number, price_usd, price_usd_foil FROM cards WHERE price_usd IS NOT NULL').all()
+    .map(r => [`${r.set_code}/${r.collector_number}`, r]));
+  let n = 0;
+  for (const c of cards) {
+    const p = c.rarity !== 'Promo' && prices.get(`${c.set_code}/${c.collector_number}`);
+    if (p) { c.usd = p.price_usd; if (p.price_usd_foil) c.usd_foil = p.price_usd_foil; n++; }
+  }
+  pdb.close();
+  console.log(`${n} cartes avec un prix du marché`);
+}
+
 const setOrder = c => (/^\d+$/.test(c.set_code) ? c.set_code.padStart(4, '0') : `z${c.set_code}`);
 cards.sort((a, b) => setOrder(a).localeCompare(setOrder(b)) || Number(a.collector_number) - Number(b.collector_number));
 

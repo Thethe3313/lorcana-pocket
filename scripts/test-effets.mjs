@@ -36,7 +36,8 @@ const endTurn = s => applyAction(s, { type: 'end' });
 }
 // 2. Personnage « quand vous jouez ce personnage, piochez »
 {
-  const n = rows.find(r => r.card_type === 'Character' && /^\S+ [A-Z ]+ When you play this character, draw a card\.$/.test(r.text_en || ''));
+  const n = rows.find(r => { const c = parseCard(r); const a = c.abilities[0]; return c.kind === 'character' && c.fullyHandled && c.abilities.length === 1 && a.kind === 'triggered' && a.ons[0].on === 'play' && a.effects.length === 1 && a.effects[0].k === 'draw' && !a.effects[0].opt && !a.effects[0].cond && !a.effects[0].who; });
+  console.log('test pioche :', n?.full_name);
   if (n) {
     const s = setup([n]);
     const before = s.players[0].hand.length;
@@ -46,7 +47,8 @@ const endTurn = s => applyAction(s, { type: 'end' });
 }
 // 3. Effet permanent « Your other characters get +1 {S} »
 {
-  const lord = rows.find(r => r.card_type === 'Character' && /Your other characters get \+1 ¤\.?$/.test(r.text_en || ''));
+  const lord = rows.find(r => parseCard(r).abilities.some(a => a.kind === 'static' && a.st === 'mod' && a.subj?.who === 'own' && a.subj.f.other && !a.subj.f.cls && !a.subj.f.named && !a.cond && !a.yourTurn && !a.per && a.mods.length === 1 && a.mods[0][0] === 'str' && a.mods[0][1] === 1));
+  console.log('test bonus :', lord?.full_name);
   if (lord) {
     const s = setup([lord, filler]);
     play(s, lord.full_name); play(s, filler.full_name);
@@ -56,7 +58,8 @@ const endTurn = s => applyAction(s, { type: 'end' });
 }
 // 4. Lieu : lore au début du tour, déplacement, bonus « ici »
 {
-  const loc = rows.find(r => r.card_type === 'Location' && r.lore > 0 && /Characters get \+1 ◊ while here/.test(r.text_en || ''));
+  const loc = rows.find(r => { const c = parseCard(r); return c.kind === 'location' && c.moveCost <= 3 && c.abilities.some(a => a.kind === 'static' && a.st === 'mod' && a.cond?.c === 'here' && !a.cond.named && a.mods.some(([st, n]) => st === 'lore' && n === 1)); });
+  console.log('test lieu :', loc?.full_name);
   if (loc) {
     const s = setup([loc, filler]);
     play(s, loc.full_name); play(s, filler.full_name);
@@ -71,7 +74,8 @@ const endTurn = s => applyAction(s, { type: 'end' });
 }
 // 5. Objet avec capacité ⟳
 {
-  const item = rows.find(r => r.card_type === 'Item' && /^[A-Z' ]+ ⟳ – Draw a card\.$/.test(r.text_en || '')) || rows.find(r => r.card_type === 'Item' && /⟳.*Draw a card/.test(r.text_en || '') && parseCard(r).battleLegal);
+  const item = rows.find(r => { const c = parseCard(r); return c.kind === 'item' && c.battleLegal && c.abilities.some(a => a.kind === 'activated' && a.cost.exert && !a.cost.ink && !a.cost.banish && !a.cost.discard && !a.cost.banishItem && a.effects.length === 1 && a.effects[0].k === 'draw' && !a.effects[0].cond && !a.effects[0].who); });
+  console.log('test objet :', item?.full_name);
   if (item) {
     const s = setup([item]);
     play(s, item.full_name);

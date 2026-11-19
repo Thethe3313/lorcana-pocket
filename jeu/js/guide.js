@@ -8,9 +8,11 @@ export const KW_FR = { evasive: 'Insaisissable', rush: 'Charge', ward: "Hors d'a
   singer: 'Mélomane', singTogether: "À l'unisson" };
 export const kwLabel = (k, v) => (v === true ? KW_FR[k] || k : `${KW_FR[k] || k} ${k === 'challenger' || k === 'resist' ? '+' : ''}${v}`);
 
-const REMOVAL = ['damage', 'damageAllOpp', 'banish', 'banishAll', 'return', 'exert', 'oppBanishOwn'];
+const REMOVAL = ['damage', 'banish', 'return', 'exert', 'oppChoose', 'toInk', 'tuck', 'restrict'];
 const value = c => c.kind === 'character' ? c.lore * 2.2 + c.str * 0.9 + c.wil * 0.7 + (c.kw.evasive ? 1.2 : 0) + (c.kw.ward ? 0.6 : 0) + c.abilities.length * 0.8 : 2 + c.cost * 0.5;
-const fx = c => [...(c.effects || []), ...c.abilities.flatMap(a => a.effects)];
+// tous les effets d'une carte (capacités déclenchées, activées, effet d'action), options de « Choose one » comprises
+const flat = list => (list || []).flatMap(e => (e.k === 'choose' ? e.options.flat() : [e]));
+const fx = c => c.abilities.flatMap(a => flat(a.effects));
 
 /**
  * @param rows lignes de cartes du deck (avec les champs d'affichage : name, full_name, text…)
@@ -31,7 +33,7 @@ export function deckGuide(rows) {
   const avgLore = chars.reduce((s, x) => s + x.c.lore * x.n, 0) / nChars;
   const avgStr = chars.reduce((s, x) => s + x.c.str * x.n, 0) / nChars;
   const evasive = sum(x => x.c.kw.evasive ? 1 : 0);
-  const removal = sum(x => fx(x.c).some(e => REMOVAL.includes(e.kind)) ? 1 : 0);
+  const removal = sum(x => fx(x.c).some(e => REMOVAL.includes(e.k)) ? 1 : 0);
   const inkable = sum(x => x.c.inkable ? 1 : 0);
   const total = rows.length;
   const avgCost = sum(x => x.c.cost) / total;
@@ -80,15 +82,15 @@ export function deckGuide(rows) {
       `Au lieu de payer ${s.c.cost} encres, fais chanter <b>${singers.map(name).join('</b> ou <b>')}</b> (il doit être en jeu depuis un tour ; il s'épuise et ne quête pas ce tour). Idéal avec un personnage qui rapporte peu de lore.`, [s.row.id, ...singers.map(y => y.row.id)]);
   }
   // Redresser après une quête
-  const readiers = all.filter(x => fx(x.c).some(e => e.kind === 'ready'));
+  const readiers = all.filter(x => fx(x.c).some(e => e.k === 'ready' && e.t?.sel === 'chosen' && e.t.side !== 'opp'));
   const bestQuester = chars.slice().sort((a, b) => b.c.lore - a.c.lore)[0];
   for (const r of readiers) if (bestQuester) add('🔄', `Double quête avec ${short(r)}`,
     `Envoie <b>${name(bestQuester)}</b> en quête (+${bestQuester.c.lore} lore), puis joue <b>${name(r)}</b> pour le redresser : il peut quêter une deuxième fois dans le même tour.`, [bestQuester.row.id, r.row.id]);
   // Bonus de lore
-  for (const b of all.filter(x => fx(x.c).some(e => e.kind === 'buffLore'))) if (bestQuester) add('✨', `Lore bonus : ${short(b)}`,
+  for (const b of all.filter(x => fx(x.c).some(e => e.k === 'mod' && e.t?.sel === 'chosen' && e.mods.some(([st, n]) => st === 'lore' && n > 0)))) if (bestQuester) add('✨', `Lore bonus : ${short(b)}`,
     `Utilise <b>${name(b)}</b> sur un personnage qui va quêter ce tour (par exemple <b>${short(bestQuester)}</b>) pour gagner encore plus de lore.`, [b.row.id, bestQuester.row.id]);
   // Dégâts puis défi
-  const pingers = all.filter(x => fx(x.c).some(e => e.kind === 'damage' || e.kind === 'damageAllOpp'));
+  const pingers = all.filter(x => fx(x.c).some(e => e.k === 'damage'));
   const fighters = chars.filter(x => x.c.kw.challenger || x.c.str >= 3).sort((a, b) => (b.c.str + (b.c.kw.challenger || 0)) - (a.c.str + (a.c.kw.challenger || 0)));
   if (pingers.length && fighters.length) add('💥', 'Abîmer puis achever',
     `Inflige des dégâts avec <b>${pingers.slice(0, 2).map(name).join('</b> ou <b>')}</b>, puis termine le personnage adverse en le défiant avec <b>${name(fighters[0])}</b> : il est banni et ton personnage prend moins de risques.`, [...pingers.slice(0, 2).map(x => x.row.id), fighters[0].row.id]);
