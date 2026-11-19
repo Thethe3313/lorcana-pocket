@@ -101,6 +101,86 @@ const endTurn = s => applyAction(s, { type: 'end' });
   }
 }
 
+// 8. Lore « pour chaque dégât »
+{
+  const s = setup([byName('Donald Duck - Not Again!')]);
+  play(s, 'Donald Duck - Not Again!');
+  const d = s.players[0].play[0]; d.damage = 2;
+  check('Donald : +1 lore par dégât', loreOf(d, s) === d.card.lore + 2, `lore ${loreOf(d, s)}`);
+}
+// 9. Payer de l'encre pendant un effet (« you may pay 1 {I} to draw a card »)
+{
+  const s = setup([byName("Ursula's Shell Necklace"), byName('Friends on the Other Side')]);
+  play(s, "Ursula's Shell Necklace");
+  const P = s.players[0], used = P.inkUsed, hand = P.hand.length;
+  play(s, 'Friends on the Other Side');
+  check('Collier : 1 encre payée en plus', P.inkUsed === used + 3 + 1, `encre ${used} -> ${P.inkUsed}`);
+  check('Collier : chanson (2 cartes) + 1 carte', P.hand.length === hand - 1 + 3, `main ${hand} -> ${P.hand.length}`);
+}
+// 10. Condition « si tu as joué une chanson ce tour-ci »
+{
+  const s = setup([byName("Sleepy's Flute"), byName('Friends on the Other Side')]);
+  play(s, "Sleepy's Flute");
+  const flute = s.players[0].items[0];
+  const idx = flute.card.abilities.findIndex(a => a.kind === 'activated');
+  applyAction(s, { type: 'activate', uid: flute.uid, index: idx });
+  check('Flûte sans chanson : pas de lore', s.players[0].lore === 0);
+  endTurn(s); endTurn(s);
+  play(s, 'Friends on the Other Side');
+  applyAction(s, { type: 'activate', uid: flute.uid, index: idx });
+  check('Flûte après une chanson : +1 lore', s.players[0].lore === 1, `lore ${s.players[0].lore}`);
+}
+// 11. Récupérer 2 objets de la défausse ; défausse choisie chez l'adversaire
+{
+  const s = setup([byName('Treasures Untold')], [filler, byName('Smash')]);
+  const P = s.players[0];
+  P.discard = [byName("Sleepy's Flute"), byName("Ursula's Shell Necklace"), filler].map(r => ({ uid: s.nextUid++, card: parseCard(r), owner: 0, mods: [], under: [] }));
+  play(s, 'Treasures Untold');
+  check('Trésors : 2 objets récupérés', P.hand.filter(x => x.card.kind === 'item').length === 2, P.hand.map(x => x.card.name).join(', '));
+  const s2 = setup([byName('The Bare Necessities')], [filler, byName('Smash')]);
+  play(s2, 'The Bare Necessities');
+  const O = s2.players[1];
+  check('Il en faut peu : l\'adversaire défausse sa carte non-personnage', O.discard.some(x => x.card.name === 'Smash') && O.hand.some(x => x.card.id === filler.id), O.hand.map(x => x.card.name).join(', '));
+}
+// 12. « Tu ne peux pas jouer ce personnage sauf si… » ; soin de tous les Mousquetaires
+{
+  const s = setup([byName('Mirabel Madrigal - Family Gatherer')]);
+  const m = s.players[0].hand[0];
+  check('Mirabel injouable avec moins de 5 personnages', !applyAction(s, { type: 'play', uid: m.uid }).ok);
+  const s2 = setup([byName('Goofy - Musketeer'), byName('Pete - Rotten Guy')]);
+  play(s2, 'Pete - Rotten Guy');
+  const pete = s2.players[0].play[0]; pete.damage = 3;
+  play(s2, 'Goofy - Musketeer');
+  check('Dingo : 2 dégâts retirés au Mousquetaire', pete.damage === 1, `dégâts ${pete.damage}`);
+}
+// 13. Carte révélée jouée gratuitement ; déplacement gratuit vers un lieu ; bonus par Balai
+{
+  const s = setup([byName('Mulan - Reflecting')]);
+  play(s, 'Mulan - Reflecting'); endTurn(s); endTurn(s);
+  const P = s.players[0], mulan = P.play[0];
+  const song = { uid: s.nextUid++, card: parseCard(byName('Friends on the Other Side')), owner: 0, exerted: false, fresh: false, damage: 0, mods: [], under: [], at: null, shifted: false, once: {} };
+  P.deck.push(song); const hand = P.hand.length;
+  applyAction(s, { type: 'quest', uid: mulan.uid });
+  check('Mulan : chanson révélée jouée gratuitement (+2 cartes)', P.discard.includes(song) && P.hand.length === hand + 2, `main ${hand} -> ${P.hand.length}`);
+  const filler2 = P.deck[P.deck.length - 1];
+  endTurn(s); endTurn(s);
+  applyAction(s, { type: 'quest', uid: mulan.uid });
+  check('Mulan : carte non-chanson remise sur le dessus', P.deck[P.deck.length - 1] !== undefined);
+
+  const loc = rows.find(r => r.card_type === 'Location' && r.cost <= 3 && parseCard(r).battleLegal);
+  const s2 = setup([byName('Colonel Hathi - On the March'), loc]);
+  play(s2, loc.full_name); play(s2, 'Colonel Hathi - On the March'); endTurn(s2); endTurn(s2);
+  const h = s2.players[0].play[0];
+  applyAction(s2, { type: 'quest', uid: h.uid });
+  check('Hathi : se déplace gratuitement au lieu en partant en quête', h.at === s2.players[0].locations[0].uid);
+
+  const broom = byName('Magic Broom - Brigade Commander'), other = rows.find(r => r.name_en === 'Magic Broom' && r.full_name_en !== broom.full_name_en && r.card_type === 'Character');
+  const s3 = setup([broom, other, other]);
+  play(s3, broom.full_name); play(s3, other.full_name); play(s3, other.full_name);
+  const b = s3.players[0].play.find(x => x.card.id === broom.id);
+  check('Balai commandant : +2 force par autre Balai', strOf(b, s3) === broom.strength + 4, `force ${strOf(b, s3)}`);
+}
+
 // 7. Parties complètes avec decks riches en objets, lieux et actions
 const pool = rows.filter(r => /^\d+$/.test(r.set_code) && parseCard(r).battleLegal);
 let crashes = 0, refused = 0, activations = 0, moves = 0, locChallenges = 0, games = 0;
