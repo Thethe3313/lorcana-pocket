@@ -343,7 +343,7 @@ input[type=text], input[type=search], select { background: var(--bg2); color: va
 .zone-sep { width: 2px; align-self: stretch; background: var(--line); margin: 0 4px; border-radius: 2px; }
 /* les visuels de lieux sont stockés debout : on les tourne pour les lire à l'horizontale, comme la vraie carte */
 .slot.location { margin: 0 22px; }
-.slot.location .card { transform: rotate(-90deg) scale(.9); }
+.slot.location .card { transform: rotate(90deg) scale(.9); }
 .slot.item .card { filter: saturate(.9); }
 .slot.item.exerted .card { transform: rotate(90deg) scale(.8); }
 
@@ -361,3 +361,15 @@ input[type=text], input[type=search], select { background: var(--bg2); color: va
 .filter-box > summary { cursor: pointer; font-weight: 800; color: var(--gold); padding: 6px 0; list-style: none; }
 .filter-box > summary::before { content: '▸ '; }
 .filter-box[open] > summary::before { content: '▾ '; }
+
+/* Lieux à l'horizontale (panneau, vue agrandie, fiche) : --lw = largeur du cadre paysage */
+.land { --lw: calc(var(--card-w) * 1200 / 859); position: relative; flex: none; width: var(--lw); height: calc(var(--lw) * 859 / 1200); }
+.land > .card { position: absolute; left: 50%; top: 50%; width: calc(var(--lw) * 859 / 1200); transform: translate(-50%, -50%) rotate(90deg); }
+.action-panel .zoomable .land { --lw: 236px; }
+.battle-zoom .zcard .land { --lw: min(620px, 92vw, calc((100vh - 110px) * 1200 / 859)); }
+.tilt .land { --lw: min(480px, 88vw); }
+@media (max-width: 600px) {
+  .action-panel .zoomable .land { --lw: 150px; }
+  .battle-zoom .zcard .land { --lw: 92vw; }
+  .tilt .land { --lw: 90vw; }
+}

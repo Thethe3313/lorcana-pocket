@@ -1,6 +1,6 @@
 import { newGame, applyAction, aiNextAction, playOptions, canInk, canQuest, challengeTargets, pendingTargetEffect, effectTargets,
   activateOptions, moveOptions, inkAvailable, strOf, loreOf, wilOf, findInst, buildDeck, RULES, INKS } from './engine.js';
-import { S, api, cardHTML, esc, toast, showCard, deckErrors, INK_FR } from './app.js';
+import { S, api, cardHTML, landHTML, esc, toast, showCard, deckErrors, INK_FR } from './app.js';
 import { kwLabel } from './guide.js';
 import { normalize } from './effects.js';
 
@@ -181,7 +181,7 @@ class BattleUI {
     const p = this.panelParts(); if (!p) return '';
     const { inst, btns, kw, abil, info } = p;
     if (this.zoom) return this.zoomView(p);
-    return `<div class="action-panel"><div class="zoomable" data-act="zoom" title="Agrandir la carte">${cardHTML(this.row(inst), { full: true, eager: true })}<span class="zoom-hint">🔍</span></div>
+    return `<div class="action-panel"><div class="zoomable" data-act="zoom" title="Agrandir la carte">${landHTML(this.row(inst), cardHTML(this.row(inst), { full: true, eager: true }))}<span class="zoom-hint">🔍</span></div>
       <div class="btns">${btns.join('')}
       ${kw ? `<div class="info">Mots-clés : ${esc(kw)}</div>` : ''}${abil ? `<div class="info">⚡ ${esc(abil)}</div>` : ''}
       ${info ? `<div class="info">${esc(info)}</div>` : ''}
@@ -199,7 +199,7 @@ class BattleUI {
     return `<div class="battle-zoom">
       <div class="ztop"><button class="btn" data-act="unzoom">← Retour</button><span class="muted">${esc(where)}</span></div>
       <div class="zbody">
-        <div class="zcard">${cardHTML(row, { full: true, eager: true })}</div>
+        <div class="zcard">${landHTML(row, cardHTML(row, { full: true, eager: true }))}</div>
         <div class="zinfo">
           <h2>${esc(row.name)}</h2>${row.version ? `<div class="muted">${esc(row.version)}</div>` : ''}
           ${stats}

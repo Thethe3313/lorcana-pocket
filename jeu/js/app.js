@@ -46,6 +46,9 @@ export function cardHTML(c, o = {}) {
   return `<div class="${cls}" ${o.attrs || ''} data-id="${esc(c.id)}">${frame}${img}${o.extra || ''}</div>`;
 }
 
+// Les lieux se lisent à l'horizontale : la carte est tournée dans un cadre au format paysage
+export const landHTML = (c, html) => (c.card_type === 'Location' ? `<div class="land">${html}</div>` : html);
+
 const owned = id => { const q = S.profile.collection[id]; return q ? q[0] + q[1] : 0; };
 const ownedFoil = id => S.profile.collection[id]?.[1] || 0;
 
@@ -60,7 +63,7 @@ export function showCard(id, onBack = null, onChange = null) {
   m.classList.remove('guide-mode');
   m.innerHTML = `${onBack ? '<button class="btn back-guide">← Retour au guide</button>' : ''}<button class="close-x" aria-label="Fermer">✕</button>
     <div class="modal-body">
-      <div class="tilt">${cardHTML(c, { full: true, foil: ownedFoil(id) > 0, eager: true })}</div>
+      <div class="tilt">${landHTML(c, cardHTML(c, { full: true, foil: ownedFoil(id) > 0, eager: true }))}</div>
       <div class="card-info">
         <h1>${esc(c.name)}</h1><div class="muted">${esc(c.version || '')}</div>
         <div class="kv">
@@ -84,7 +87,7 @@ export function showCard(id, onBack = null, onChange = null) {
   m.onmousemove = e => {
     const r = tilt.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
-    if (Math.abs(x) < .8 && Math.abs(y) < .8) tilt.style.transform = `rotateY(${x * 18}deg) rotateX(${-y * 18}deg)`;
+    if (Math.abs(x) < .8 && Math.abs(y) < .8) tilt.style.transform = `${c.card_type === 'Location' ? 'translate(-50%, -50%) rotate(90deg) ' : ''}rotateY(${x * 18}deg) rotateX(${-y * 18}deg)`;
   };
   m.onclick = async e => {
     if (e.target.id === 'buy') {
