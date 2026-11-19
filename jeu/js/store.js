@@ -24,7 +24,7 @@ export function initStore(allCards, sets) {
   boosterSets = sets.filter(s => /^\d+$/.test(s.code)).map(s => s.code);
 }
 
-const fresh = () => ({ version: 1, name: 'Illumineur', coins: ECO.START_COINS, freePacks: ECO.FREE_PACK_MAX, freePacksAt: Date.now(),
+const fresh = () => ({ version: 2, name: 'Illumineur', coins: ECO.START_COINS, freePacks: ECO.FREE_PACK_MAX, freePacksAt: Date.now(),
   starter: null, wins: 0, losses: 0, collection: {}, decks: [], nextDeckId: 1, openings: 0, lang: 'fr', createdAt: Date.now() });
 
 let save = null;
@@ -32,9 +32,28 @@ function load() {
   if (save) return save;
   try { save = JSON.parse(localStorage.getItem(KEY)) || null; } catch { save = null; }
   if (!save || typeof save !== 'object') save = fresh();
+  const old = save.version || 1;
   save = { ...fresh(), ...save };
+  if (old < 2) migrateTo60();
   return save;
 }
+// Passage aux règles officielles (60 cartes, 4 exemplaires) : le deck de départ devient un vrai deck
+// de départ de 60 cartes (4 exemplaires de chaque carte, ajoutés à la collection) ; les autres decks restent à compléter.
+function migrateTo60() {
+  const p = save;
+  const starter = p.decks.find(d => d.name.startsWith('Départ'));
+  if (starter && starter.cards.length < RULES.DECK_SIZE) {
+    const extra = [...starter.cards];
+    for (const id of extra) { const q = p.collection[id] || [0, 0]; q[0]++; p.collection[id] = q; }
+    starter.cards = [...starter.cards, ...extra];
+  }
+  p.version = 2;
+  p.notice = 'Nouvelles règles : les decks font maintenant 60 cartes minimum, avec 4 exemplaires maximum par carte, comme dans le vrai jeu. '
+    + (starter ? 'Ton deck de départ a été complété (4 exemplaires de chaque carte, ajoutés à ta collection). ' : '')
+    + 'Tes autres decks sont à compléter : ouvre-les et touche « Compléter avec mes cartes ».';
+  persist();
+}
+
 function persist() { try { localStorage.setItem(KEY, JSON.stringify(save)); } catch (e) { console.warn('Sauvegarde impossible', e); } }
 
 export const getLang = () => load().lang;
@@ -54,7 +73,7 @@ function profile() {
   refillFree();
   const p = load();
   return { name: p.name, coins: p.coins, freePacks: p.freePacks, nextFreePack: p.freePacks < ECO.FREE_PACK_MAX ? p.freePacksAt + ECO.FREE_PACK_HOURS * 3600e3 : null,
-    starter: p.starter, wins: p.wins, losses: p.losses, lang: p.lang, collection: p.collection,
+    starter: p.starter, wins: p.wins, losses: p.losses, lang: p.lang, collection: p.collection, notice: p.notice || null,
     decks: p.decks.map(d => ({ ...d, cards: [...d.cards] })), rules: { ...RULES, ...ECO }, starters: STARTERS };
 }
 
@@ -196,9 +215,11 @@ const routes = {
     try { data = JSON.parse(text); } catch { throw new Error('Fichier illisible'); }
     const s = data?.save;
     if (data?.jeu !== 'Lorcana Pocket' || !s || typeof s.collection !== 'object' || !Array.isArray(s.decks)) throw new Error('Ce fichier n\'est pas une sauvegarde Lorcana Pocket');
-    save = { ...fresh(), ...s }; persist();
+    save = { ...fresh(), ...s, version: s.version || 1 }; if (save.version < 2) migrateTo60(); else persist();
     return profile();
   },
+
+  '/api/notice-seen': () => { load().notice = null; persist(); return profile(); },
 
   '/api/reset': () => { const lang = load().lang; save = { ...fresh(), lang }; persist(); return profile(); },
 };

@@ -261,11 +261,11 @@ function renderDecks() {
   const decks = S.profile.decks;
   view.innerHTML = `<div class="row"><h1>Mes decks</h1><span class="spacer"></span>
       <button class="btn gold" id="best">🏆 Meilleur deck</button><button class="btn" id="auto">✨ Deck automatique</button><button class="btn" id="new">+ Nouveau deck</button></div>
-    <p class="muted">Format Pocket : ${RULES.DECK_SIZE} cartes, ${RULES.MAX_COPIES} exemplaires max par carte, ${RULES.MAX_INKS} encres max. Seuls les personnages et les actions dont l'effet est géré sont jouables.</p>
+    <p class="muted">Règles officielles : au moins ${RULES.DECK_SIZE} cartes, ${RULES.MAX_COPIES} exemplaires maximum d'une même carte, 1 ou ${RULES.MAX_INKS} encres. Seules les cartes dont l'effet est géré en combat peuvent aller dans un deck.</p>
     <div class="deck-list">${decks.map(d => {
       const errs = deckErrors(d.cards), cover = S.byId.get(d.cards.map(id => S.byId.get(id)).sort((a, b) => b.cost - a.cost)[0]?.id);
       return `<div class="panel deck-tile" data-id="${d.id}"><div class="cover">${cover ? cardHTML(cover) : '<div class="card-back"></div>'}</div>
-        <div><b>${esc(d.name)}</b><div>${inkDots(deckInks(d.cards))}</div><div class="${errs.length ? 'errs' : 'muted'}">${d.cards.length}/${RULES.DECK_SIZE} cartes ${errs.length ? '· incomplet' : '· prêt ✔'}</div></div></div>`;
+        <div><b>${esc(d.name)}</b><div>${inkDots(deckInks(d.cards))}</div><div class="${errs.length ? 'errs' : 'muted'}">${d.cards.length} cartes ${errs.length ? `· à compléter (${RULES.DECK_SIZE} minimum)` : '· prêt ✔'}</div></div></div>`;
     }).join('') || '<p class="muted">Aucun deck pour l\'instant.</p>'}</div>`;
   $('#new').onclick = () => editDeck({ id: null, name: 'Nouveau deck', cards: [] });
   $('#auto').onclick = autoDeck;
@@ -324,9 +324,10 @@ function editDeck(deck) {
     const max = Math.max(1, ...curve);
     const errs = deckErrors(deck.cards);
     const inkable = deck.cards.filter(id => S.byId.get(id).inkwell).length;
-    $('#side').innerHTML = `<div class="row"><b>${deck.cards.length} / ${RULES.DECK_SIZE}</b><span>${inkDots(deckInks(deck.cards))}</span><span class="spacer"></span><span class="muted" style="font-size:.8rem">${inkable} encrables</span></div>
+    $('#side').innerHTML = `<div class="row"><b>${deck.cards.length} cartes</b><span class="muted" style="font-size:.8rem">(${RULES.DECK_SIZE} minimum)</span><span>${inkDots(deckInks(deck.cards))}</span><span class="spacer"></span><span class="muted" style="font-size:.8rem">${inkable} encrables</span></div>
       <div class="curve">${curve.map((n, k) => `<div style="height:${n / max * 100}%"><span>${k === 6 ? '7+' : k + 1}</span></div>`).join('')}</div><div style="height:14px"></div>
       ${errs.length ? `<div class="errs">${errs.map(esc).join('<br>')}</div>` : '<div style="color:var(--ok)">Deck valide ✔</div>'}
+      ${deck.cards.length < RULES.DECK_SIZE ? `<button class="btn small gold" id="fill" style="margin-top:8px;width:100%">✨ Compléter avec mes cartes</button>` : ''}
       <div style="margin-top:8px">${lines.map(({ c, n }) => `<div class="deck-line" data-fn="${esc(c.full_name)}" title="Retirer un exemplaire"><span class="c">${c.cost}</span><span class="ink-dot" style="background:var(--${c.ink || 'Steel'})"></span><span class="n">${esc(c.full_name)}</span><b>×${n}</b></div>`).join('') || '<p class="muted">Clique sur une carte pour l\'ajouter.</p>'}</div>`;
   };
   drawPool(); drawSide();
@@ -334,13 +335,20 @@ function editDeck(deck) {
     const id = e.target.closest('.card')?.dataset.id; if (!id) return;
     const c = S.byId.get(id), max = Math.min(RULES.MAX_COPIES, have[c.full_name] || 0);
     if (inDeck(c.full_name) >= max) return toast('Nombre maximum d\'exemplaires atteint');
-    if (deck.cards.length >= RULES.DECK_SIZE) return toast(`Le deck est complet (${RULES.DECK_SIZE} cartes)`);
     const inks = new Set([...deckInks(deck.cards), c.ink]);
     if (inks.size > RULES.MAX_INKS) return toast(`${RULES.MAX_INKS} encres maximum par deck`);
     deck.cards.push(id); drawPool(); drawSide();
   };
   $('#pool').oncontextmenu = e => { const id = e.target.closest('.card')?.dataset.id; if (id) { e.preventDefault(); showCard(id); } };
   $('#side').onclick = e => {
+    if (e.target.id === 'fill') {
+      const inks = deckInks(deck.cards);
+      if (!inks.length) return toast("Ajoute d'abord une carte pour choisir l'encre du deck (ou utilise ✨ Deck automatique)");
+      const ids = buildDeck(ownedRows, inks, { available: have, start: deck.cards.map(id => S.byId.get(id)) });
+      deck.cards = ids; drawPool(); drawSide();
+      return toast(ids.length >= RULES.DECK_SIZE ? 'Deck complété avec tes meilleures cartes ✔'
+        : `Il manque des cartes : ${ids.length}/${RULES.DECK_SIZE} en ${inks.map(k => INK_FR[k]).join(' / ')}. Ouvre des boosters${inks.length < 2 ? ' ou ajoute une deuxième encre' : ''}.`, 4500);
+    }
     const fn = e.target.closest('[data-fn]')?.dataset.fn; if (!fn) return;
     const idx = deck.cards.findLastIndex(id => S.byId.get(id).full_name === fn);
     if (idx >= 0) deck.cards.splice(idx, 1); drawPool(); drawSide();
@@ -355,6 +363,14 @@ function editDeck(deck) {
     catch (e) { toast(e.message); }
   };
   if (deck.id) $('#del').onclick = async () => { if (confirm('Supprimer ce deck ?')) { await api('/api/deck/delete', { id: deck.id }); renderDecks(); } };
+}
+
+function showNotice(text) {
+  const m = $('#modal');
+  m.innerHTML = `<div class="panel" style="max-width:520px"><h2 style="margin-top:0">✦ Nouveauté</h2><p>${esc(text)}</p>
+    <div class="row"><span class="spacer"></span><button class="btn gold" id="notice-ok">Compris</button></div></div>`;
+  m.classList.remove('hidden');
+  m.onclick = async e => { if (e.target.id === 'notice-ok') { await api('/api/notice-seen'); closeModal(); route(); } };
 }
 
 // ---------------------------------------------------------------- Routeur
@@ -570,6 +586,7 @@ window.addEventListener('hashchange', route);
   document.documentElement.lang = S.lang;
   initStore(S.cards, S.allSets);
   await api('/api/profile');
+  if (S.profile.notice) showNotice(S.profile.notice);
   route();
   setInterval(async () => { if (!document.body.classList.contains('in-battle')) await api('/api/profile').catch(() => {}); }, 60000);
 })();
