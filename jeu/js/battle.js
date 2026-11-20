@@ -234,7 +234,7 @@ class BattleUI {
     }
     if (mine && ['play', 'items', 'locations'].includes(zone) && myTurn) {
       for (const o of activateOptions(G, 0, uid)) {
-        const cost = [o.cost.exert && '⟳', o.cost.ink && `${o.cost.ink} encre`, o.cost.banish && 'bannir la carte', o.cost.banishItem && 'bannir un objet', o.cost.discard && 'défausser une carte'].filter(Boolean).join(', ');
+        const cost = [o.cost.exert && '⟳', o.cost.ink && `${o.cost.ink} encre`, o.cost.banish && 'bannir la carte', o.cost.banishItem && (o.cost.banishItem > 1 ? `bannir ${o.cost.banishItem} objets` : 'bannir un objet'), o.cost.discard && 'défausser une carte', o.cost.exertOther && `épuiser un autre ${o.cost.exertOther === 'item' ? 'objet' : 'personnage'}`, o.cost.banishChar && 'bannir un de tes personnages', o.cost.selfDamage && `${o.cost.selfDamage} dégât sur la carte`].filter(Boolean).join(', ') || 'gratuit';
         btns.push(`<button class="btn" data-ab="${o.index}">⚡ ${esc(abilityName(this.row(inst), o.text) || o.label || 'Utiliser')} (${cost})</button>`);
       }
     }

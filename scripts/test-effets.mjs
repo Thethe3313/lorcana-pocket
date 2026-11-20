@@ -394,6 +394,34 @@ const endTurn = s => applyAction(s, { type: 'end' });
   play(s5, 'Air Drop', { target: t.uid });
   check('Largage : 3 dégâts sur un personnage indemne', t.damage === 3 || !s5.players[1].play.includes(t));
 }
+// 23. Capacité « une fois par tour » ; gratuit sous condition ; protection contre les blessés ; lore à atteindre
+{
+  const s = setup([byName('Kronk - Meat Hut Cook')]);
+  play(s, 'Kronk - Meat Hut Cook');
+  const k = s.players[0].play[0], idx = abilityIndex(k);
+  const used = s.players[0].inkUsed;
+  check('Kronk : capacité utilisable dès l\'arrivée', applyAction(s, { type: 'activate', uid: k.uid, index: idx }).ok);
+  check('Kronk : 1 encre payée', s.players[0].inkUsed === used + 1);
+  check('Kronk : une seule fois par tour', !applyAction(s, { type: 'activate', uid: k.uid, index: idx }).ok);
+
+  const s2 = setup([byName('Lilo - Making a Wish'), byName('Pudge - Controls the Weather')], [], 1);
+  play(s2, 'Lilo - Making a Wish');
+  check('Pudge : gratuit avec Lilo en jeu', play(s2, 'Pudge - Controls the Weather').r.ok);
+
+  const s3 = setup([filler], [byName('Ed - Hysterical Partygoer')]);
+  s3.active = 1; play(s3, 'Ed - Hysterical Partygoer'); endTurn(s3); play(s3, filler.full_name); endTurn(s3);
+  const ed = s3.players[1].play[0]; ed.exerted = true; endTurn(s3);
+  const att = s3.players[0].play[0]; att.damage = 1;
+  check('Ed : un personnage blessé ne peut pas le défier', !applyAction(s3, { type: 'challenge', uid: att.uid, target: ed.uid }).ok);
+
+  const s4 = setup([], [byName('Donald Duck - Flustered Sorcerer')]);
+  s4.active = 1; play(s4, 'Donald Duck - Flustered Sorcerer'); endTurn(s4);
+  s4.players[0].lore = 19; s4.players[0].play.push(...[]);
+  const q = s4.players[0];
+  q.lore = 22;
+  check('Donald : l\'adversaire n\'a pas gagné à 22 lore', !s4.over);
+}
+function abilityIndex(i) { return i.card.abilities.findIndex(a => a.kind === 'activated'); }
 function canQuestFor(s, inst) { return !inst.mods.some(m => m.restrict) && !(s.players[inst.owner].play.includes(inst) === false); }
 function banishItem(s) { const it = s.players[0].items[0]; if (it) { const P = s.players[0]; P.items.splice(P.items.indexOf(it), 1); for (const i of [...s.players[0].play, ...s.players[1].play]) i.mods = i.mods.filter(m => m.exp?.uid !== it.uid); } }
 
