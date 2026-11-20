@@ -210,3 +210,20 @@ input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow
   .castle { width: 100%; min-width: 0; height: auto; top: 6px; bottom: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .castle * { animation: none !important; } .castle .fw { opacity: .6; } }
+
+/* ---------- Téléphone : zones sûres (encoche, barre d'état, barre du bas) ----------
+   L'appli installée s'affiche sous la barre d'état : tout ce qui est collé en haut ou en bas doit la contourner. */
+.modal { padding-top: calc(16px + env(safe-area-inset-top)); padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+.close-x { top: calc(10px + env(safe-area-inset-top)); right: 12px; z-index: 5; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; font-size: 1.3rem; line-height: 1;
+  color: var(--gold3); background: rgba(8,12,34,.88); border: 1px solid rgba(245,207,107,.6); border-radius: 50%; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+.back-guide { top: calc(10px + env(safe-area-inset-top)); z-index: 6; }
+.modal.guide-mode { padding-top: 16px; }
+.guide .guide-top { padding-top: calc(12px + env(safe-area-inset-top)); margin-top: -16px; }
+.targeting-bar { top: calc(12px + env(safe-area-inset-top)); }
+.opening, .end-screen { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+.toast { bottom: calc(90px + env(safe-area-inset-bottom)); }
+@media (max-width: 600px) {
+  .targeting-bar { top: auto; bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .action-panel { bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .modal-body { padding-top: 44px; } /* laisse la place au bouton de fermeture */
+}
