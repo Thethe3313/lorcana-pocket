@@ -229,6 +229,6 @@ input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow
 }
 
 /* bouton « Fermer » en bas de la fiche : toujours sous le pouce */
-.close-bottom { position: fixed; left: 50%; translate: -50% 0; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 5; min-width: 160px; padding: 12px 28px; border-radius: 99px; font-size: 1.05rem; box-shadow: 0 8px 24px rgba(0,0,0,.6), 0 0 0 1px rgba(255,241,194,.6); }
+.btn.gold.close-bottom { position: fixed; left: 50%; translate: -50% 0; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 5; min-width: 160px; padding: 12px 28px; border-radius: 99px; font-size: 1.05rem; box-shadow: 0 8px 24px rgba(0,0,0,.6), 0 0 0 1px rgba(255,241,194,.6); }
 .modal .modal-body { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
-@media (min-width: 900px) { .close-bottom { display: none; } .modal .modal-body { padding-bottom: 0; } }
+@media (min-width: 900px) { .btn.gold.close-bottom { display: none; } .modal .modal-body { padding-bottom: 0; } }
