@@ -141,6 +141,7 @@ class BattleUI {
 
   render() {
     if (current !== this) return;
+    const before = this.snapshot();
     const G = this.G, me = G.players[0], opp = G.players[1], t = this.targeting;
     if (t || !this.sel) this.zoom = false;
     const myTurn = G.active === 0 && !G.over;
@@ -175,6 +176,37 @@ class BattleUI {
       handEl.style.setProperty('--ov', `${Math.min(6, Math.floor((avail - w) / (n - 1) - w))}px`);
     }
     this.flash.clear();
+    this.animate(before);
+  }
+
+  // Photo du plateau avant un nouvel affichage : position et visuel de chaque carte en jeu
+  snapshot() {
+    const map = new Map();
+    this.view.querySelectorAll('.slot[data-uid]').forEach(el => {
+      const card = el.querySelector('.card'); if (!card) return;
+      const r = card.getBoundingClientRect();
+      map.set(+el.dataset.uid, { html: card.outerHTML, cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: card.offsetWidth, h: card.offsetHeight, rot: el.classList.contains('exerted') || el.classList.contains('location') ? 90 : 0 });
+    });
+    return map;
+  }
+
+  // Animations : une carte qui arrive en jeu apparaît avec un éclat doré ; une carte qui disparaît se dissout (bannie) ou s'envole (renvoyée)
+  animate(before) {
+    const first = !this.seen; this.seen = true;
+    if (first || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const now = new Set();
+    this.view.querySelectorAll('.slot[data-uid]').forEach(el => { const u = +el.dataset.uid; now.add(u); if (!before.has(u)) el.classList.add('enter'); });
+    for (const [uid, b] of before) {
+      if (now.has(uid)) continue;
+      const f = findInst(this.G, uid);
+      const kind = f && f.zone === 'discard' ? 'banish' : 'leave';
+      const g = document.createElement('div');
+      g.className = `ghost ${kind}`;
+      g.style.cssText = `left:${b.cx - b.w / 2}px;top:${b.cy - b.h / 2}px;width:${b.w}px;height:${b.h}px;--rot:${b.rot}deg;--card-w:${b.w}px`;
+      g.innerHTML = b.html + (kind === 'banish' ? '<i class="sp s1"></i><i class="sp s2"></i><i class="sp s3"></i><i class="sp s4"></i><i class="sp s5"></i>' : '');
+      document.body.appendChild(g);
+      setTimeout(() => g.remove(), 1100);
+    }
   }
 
   panel() {

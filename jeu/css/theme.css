@@ -164,3 +164,50 @@ input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow
   .logo::after { right: -10px; }
   .end-screen h1 { font-size: 2.4rem; }
 }
+
+/* ---------- Animations de jeu ---------- */
+/* arrivée d'une carte : elle tombe sur le tapis dans un éclat doré */
+.slot.enter .card { animation: cardIn .6s cubic-bezier(.2, .9, .3, 1.15) both; }
+.slot.enter::before { content: ''; position: absolute; left: 50%; top: 40%; width: 120%; aspect-ratio: 1; translate: -50% -50%; border-radius: 50%; pointer-events: none; z-index: 3;
+  background: radial-gradient(circle, rgba(255,241,194,.9), rgba(245,207,107,.45) 35%, transparent 65%); animation: burst .7s ease-out both; }
+@keyframes cardIn { 0% { translate: 0 -46px; scale: 1.5; opacity: 0; filter: brightness(2.4) saturate(1.4); } 55% { translate: 0 4px; scale: .96; opacity: 1; filter: brightness(1.4); } 100% { translate: 0 0; scale: 1; opacity: 1; filter: none; } }
+@keyframes burst { 0% { scale: .2; opacity: 1; } 100% { scale: 1.4; opacity: 0; } }
+
+/* carte qui quitte le plateau : fantôme posé à l'ancien emplacement */
+.ghost { position: fixed; z-index: 55; pointer-events: none; }
+.ghost .card { position: absolute; inset: 0; width: 100%; transform: rotate(var(--rot, 0deg)); animation: none; }
+.ghost.banish .card { animation: banish .95s ease-in forwards; }
+.ghost.leave .card { animation: leave .5s ease-in forwards; }
+@keyframes banish {
+  0% { filter: none; opacity: 1; scale: 1; translate: 0 0; }
+  20% { filter: brightness(1.8) hue-rotate(-30deg) drop-shadow(0 0 14px #d4213d); scale: 1.06; }
+  100% { filter: grayscale(1) brightness(2.6) blur(6px) drop-shadow(0 0 20px #9b4fc4); opacity: 0; scale: .7; translate: 0 -40px; }
+}
+@keyframes leave { to { opacity: 0; scale: .8; translate: 0 -30px; filter: brightness(1.8) blur(2px); } }
+.ghost .sp { position: absolute; width: 8px; height: 8px; border-radius: 50%; left: 50%; top: 50%; background: radial-gradient(circle, #fff, #f5cf6b 55%, transparent 70%); animation: spark .9s ease-out forwards; }
+.ghost .s1 { --dx: -60px; --dy: -70px; } .ghost .s2 { --dx: 55px; --dy: -80px; animation-delay: .08s; } .ghost .s3 { --dx: -45px; --dy: 40px; animation-delay: .12s; }
+.ghost .s4 { --dx: 70px; --dy: 30px; animation-delay: .05s; } .ghost .s5 { --dx: 0px; --dy: -100px; animation-delay: .15s; }
+@keyframes spark { 0% { translate: 0 0; scale: .4; opacity: 1; } 100% { translate: var(--dx) var(--dy); scale: 1.6; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .slot.enter .card, .slot.enter::before, .ghost { animation: none; } }
+
+/* ---------- Bannière du château (accueil) ---------- */
+.castle-hero { position: relative; margin: 0 0 8px; border-radius: 20px; overflow: hidden; min-height: 240px; display: flex; align-items: flex-end;
+  background: radial-gradient(ellipse at 70% 0%, rgba(155,79,196,.45), transparent 60%), radial-gradient(ellipse at 20% 10%, rgba(26,127,208,.4), transparent 55%), linear-gradient(180deg, #121a52 0%, #0a1035 70%, #070b22 100%);
+  box-shadow: 0 0 0 1px rgba(245,207,107,.4), inset 0 0 40px rgba(0,0,0,.4), 0 14px 34px rgba(0,0,0,.4); }
+.castle-hero .hero { position: relative; z-index: 3; width: 100%; margin: 0; padding: 20px; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 14px; max-width: 62%; min-height: 240px; }
+.castle-hero::before { content: ''; position: absolute; inset: 0 30% 0 0; z-index: 2; pointer-events: none; background: linear-gradient(90deg, rgba(7,11,34,.82), transparent); }
+.castle { position: absolute; right: 0; bottom: 0; height: 100%; width: auto; min-width: 70%; z-index: 1; }
+.castle .win { fill: #ffd978; filter: drop-shadow(0 0 3px #f5cf6b); animation: win 4s ease-in-out infinite; }
+.castle .tw { animation: twinkle 3s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.castle .flag { transform-box: fill-box; transform-origin: left center; animation: wave 2s ease-in-out infinite; }
+.castle .fw { opacity: 0; animation: firework 4.5s ease-out infinite; }
+@keyframes win { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes wave { 50% { transform: skewY(6deg) scaleX(.85); } }
+@keyframes firework { 0% { opacity: 0; transform: scale(.2); } 8% { opacity: 1; } 35% { opacity: .9; transform: scale(1.15); } 60%, 100% { opacity: 0; transform: scale(1.4); } }
+@media (max-width: 600px) {
+  .castle-hero { min-height: 280px; }
+  .castle-hero::before { inset: 0; background: linear-gradient(0deg, rgba(7,11,34,.92) 0%, rgba(7,11,34,.55) 55%, transparent 100%); }
+  .castle-hero .hero { max-width: none; padding: 14px; min-height: 280px; }
+  .castle { min-width: 100%; opacity: .9; }
+}
+@media (prefers-reduced-motion: reduce) { .castle * { animation: none !important; } .castle .fw { opacity: .6; } }

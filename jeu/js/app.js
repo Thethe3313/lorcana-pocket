@@ -1,4 +1,5 @@
 import { parseCard, validateDeck, buildDeck, RULES, INKS } from './engine.js';
+import { castleHTML } from './castle.js';
 import { renderBattle, stopBattle } from './battle.js';
 import { localApi, initStore, getLang, MYSTERY, cardPrice, sellPrice } from './store.js';
 import { deckGuide } from './guide.js';
@@ -133,12 +134,15 @@ function renderHome() {
   const fmt = ms => { const m = Math.ceil(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
   selectedSet ??= [...S.sets].reverse().find(s => featured(s.code))?.code || S.sets[0]?.code;
   view.innerHTML = `
-    <div class="hero">
-      <div><h1>Bonjour, ${esc(p.name)} ✦</h1><div class="muted">Ouvre des boosters, complète ta collection et affronte l'IA.</div></div>
-      <div class="stats">
-        <div class="stat"><b>${uniq}</b>cartes uniques</div>
-        <div class="stat"><b>${p.wins}</b>victoires</div>
-        <div class="stat"><b>${p.freePacks}</b>${p.freePacks ? 'booster(s) gratuit(s)' : `gratuit dans ${fmt(nextFree)}`}</div>
+    <div class="castle-hero">
+      ${castleHTML()}
+      <div class="hero">
+        <div><h1>Bonjour, ${esc(p.name)} ✦</h1><div class="muted">Ouvre des boosters, complète ta collection et affronte l'IA.</div></div>
+        <div class="stats">
+          <div class="stat"><b>${uniq}</b>cartes uniques</div>
+          <div class="stat"><b>${p.wins}</b>victoires</div>
+          <div class="stat"><b>${p.freePacks}</b>${p.freePacks ? 'booster(s) gratuit(s)' : `gratuit dans ${fmt(nextFree)}`}</div>
+        </div>
       </div>
     </div>
     <div class="panel row" style="margin:14px 0">
