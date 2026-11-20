@@ -20,7 +20,7 @@ const burst = (x, y, c, d) => `<g class="fw" style="transform-origin:${x}px ${y}
 const glints = Array.from({ length: 9 }, (_, i) => `<rect class="win" style="animation-delay:${(i * .37) % 3}s" x="${236 + i * 16}" y="${248 + (i % 3) * 7}" width="2" height="${5 + (i % 2) * 3}" rx="1"/>`).join('');
 
 export function castleHTML() {
-  return `<svg class="castle" viewBox="0 0 600 280" preserveAspectRatio="xMaxYMax slice" aria-hidden="true">
+  return `<svg class="castle" viewBox="0 0 600 280" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
     <defs>
       <radialGradient id="cs-moon" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#fff6d8" stop-opacity=".95"/><stop offset=".35" stop-color="#f5cf6b" stop-opacity=".3"/><stop offset="1" stop-color="#f5cf6b" stop-opacity="0"/></radialGradient>
       <linearGradient id="cs-stone" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9aa0ec"/><stop offset=".55" stop-color="#4a4fa6"/><stop offset="1" stop-color="#1f2260"/></linearGradient>

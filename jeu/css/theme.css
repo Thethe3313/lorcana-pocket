@@ -204,9 +204,9 @@ input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow
 @keyframes wave { 50% { transform: skewY(6deg) scaleX(.85); } }
 @keyframes firework { 0% { opacity: 0; transform: scale(.2); } 8% { opacity: 1; } 35% { opacity: .9; transform: scale(1.15); } 60%, 100% { opacity: 0; transform: scale(1.4); } }
 @media (max-width: 600px) {
-  .castle-hero { min-height: 280px; }
+  .castle-hero { min-height: 340px; }
   .castle-hero::before { inset: 0; background: linear-gradient(0deg, rgba(7,11,34,.92) 0%, rgba(7,11,34,.55) 55%, transparent 100%); }
-  .castle-hero .hero { max-width: none; padding: 14px; min-height: 280px; }
-  .castle { min-width: 100%; opacity: .9; }
+  .castle-hero .hero { max-width: none; padding: 14px; min-height: 340px; }
+  .castle { width: 100%; min-width: 0; height: auto; top: 6px; bottom: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .castle * { animation: none !important; } .castle .fw { opacity: .6; } }
