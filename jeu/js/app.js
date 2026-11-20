@@ -62,7 +62,7 @@ export function showCard(id, onBack = null, onChange = null) {
     : pc.fullyHandled ? `Oui — ${total > 1 ? `ses ${total} capacités sont appliquées` : 'sa capacité est appliquée'} ✔`
     : `Oui — ${applied} capacité(s) sur ${total} appliquée(s) ; les autres sont ignorées`;
   m.classList.remove('guide-mode');
-  m.innerHTML = `${onBack ? '<button class="btn back-guide">← Retour au guide</button>' : ''}<button class="close-x" aria-label="Fermer">✕</button>
+  m.innerHTML = `${onBack ? '<button class="btn back-guide">← Retour au guide</button>' : ''}<button class="close-x" aria-label="Fermer">✕</button><button class="btn gold close-bottom">Fermer</button>
     <div class="modal-body">
       <div class="tilt">${landHTML(c, cardHTML(c, { full: true, foil: ownedFoil(id) > 0, eager: true }))}</div>
       <div class="card-info">
@@ -96,7 +96,7 @@ export function showCard(id, onBack = null, onChange = null) {
       catch (err) { toast(err.message); }
       return;
     }
-    if (e.target === m || e.target.closest('.close-x') || e.target.closest('.back-guide')) onBack ? onBack() : closeModal();
+    if (e.target === m || e.target.closest('.close-x') || e.target.closest('.close-bottom') || e.target.closest('.back-guide')) onBack ? onBack() : closeModal();
   };
 }
 export function closeModal() { const m = $('#modal'); m.classList.add('hidden'); m.classList.remove('guide-mode'); m.innerHTML = ''; m.onmousemove = null; }
