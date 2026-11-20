@@ -180,6 +180,44 @@ const endTurn = s => applyAction(s, { type: 'end' });
   const b = s3.players[0].play.find(x => x.card.id === broom.id);
   check('Balai commandant : +2 force par autre Balai', strOf(b, s3) === broom.strength + 4, `force ${strOf(b, s3)}`);
 }
+// 14. Condition sur la main, choix de Mim, interdiction de jouer des actions
+{
+  const s = setup([byName('Demona - Betrayer of the Clan')]);
+  play(s, 'Demona - Betrayer of the Clan');
+  const d = s.players[0].play[0]; d.exerted = true;
+  endTurn(s); endTurn(s); // le joueur repioche : main ≥ 3 avec le deck de remplissage
+  s.players[0].hand.push(...s.players[0].deck.splice(-3));
+  d.exerted = true; endTurn(s); endTurn(s);
+  check('Démona ne se redresse pas avec 3 cartes ou plus en main', d.exerted, `main ${s.players[0].hand.length}`);
+
+  const s2 = setup([filler, byName('Madam Mim - Fox')]);
+  play(s2, filler.full_name); play(s2, 'Madam Mim - Fox');
+  const P = s2.players[0];
+  check('Mim : renvoie un autre personnage plutôt que de se bannir', P.play.some(x => x.card.name === 'Madam Mim') && P.hand.some(x => x.card.id === filler.id));
+
+  const s3 = setup([byName('Pete - Games Referee')], [byName('Smash')]);
+  play(s3, 'Pete - Games Referee'); endTurn(s3);
+  const smash = s3.players[1].hand.find(x => x.card.name === 'Smash');
+  check('Pat arbitre : l\'adversaire ne peut pas jouer d\'action', !applyAction(s3, { type: 'play', uid: smash.uid }).ok);
+  endTurn(s3); endTurn(s3);
+  check('… et peut de nouveau après le tour suivant', applyAction(s3, { type: 'play', uid: smash.uid }).ok);
+}
+// 15. « Ne peut pas être défiée par les Pirates » ; condition en tête d'une phrase composée
+{
+  const pirate = byName('Starkey - Devious Pirate');
+  const s = setup([pirate], [byName('Captain Amelia - Commander of the Legacy')]);
+  s.active = 1; play(s, 'Captain Amelia - Commander of the Legacy'); endTurn(s);
+  play(s, pirate.full_name); endTurn(s); s.players[1].play[0].exerted = true; endTurn(s);
+  const st = s.players[0].play[0], am = s.players[1].play[0];
+  check('Amelia ne peut pas être défiée par un Pirate', !applyAction(s, { type: 'challenge', uid: st.uid, target: am.uid }).ok);
+
+  const loc = rows.find(r => r.card_type === 'Location' && r.cost <= 3 && parseCard(r).battleLegal);
+  const s2 = setup([byName('Vanellope von Schweetz - Gutsy Go-Getter'), loc]);
+  play(s2, loc.full_name); play(s2, 'Vanellope von Schweetz - Gutsy Go-Getter');
+  const v = s2.players[0].play[0]; v.at = s2.players[0].locations[0].uid;
+  endTurn(s2); const lore = s2.players[0].lore; endTurn(s2);
+  check('Vanellope au lieu : +1 lore au début du tour', s2.players[0].lore === lore + loc.lore + 1, `${lore} -> ${s2.players[0].lore}`);
+}
 
 // 7. Parties complètes avec decks riches en objets, lieux et actions
 const pool = rows.filter(r => /^\d+$/.test(r.set_code) && parseCard(r).battleLegal);

@@ -130,7 +130,11 @@ function condOk(s, src, c, ctx = {}) {
     case 'oppDamaged': return O.play.some(i => i.damage > 0);
     case 'firstTurnSecond': return s.turnNumber === 2;
     case 'shifted': return !!(ctx.shifted ?? src.shifted);
-    case 'charHere': return P.play.filter(i => i.at === src.uid && (!c.exerted || i.exerted)).length >= (c.n || 1);
+    case 'charHere': return P.play.filter(i => i.at === src.uid && (!c.exerted || i.exerted) && (c.state !== 'exerted' || i.exerted) && (c.state !== 'damaged' || i.damage > 0) && (!c.cls || hasCls(i, c.cls))).length >= (c.n || 1);
+    case 'discardHas': return P.discard.some(x => typeMatch(x.card, c.type));
+    case 'oppChars': return O.play.filter(i => (c.state !== 'ready' || !i.exerted) && (c.state !== 'exerted' || i.exerted) && (c.state !== 'damaged' || i.damage > 0)).length >= c.n;
+    case 'oppLoreMax': return O.lore <= c.n;
+    case 'oppMoreChars': return O.play.length > P.play.length;
     case 'under': return (src.under?.length || 0) > 0;
     case 'here': return true; // traité par le sujet
     case 'played': {
@@ -241,6 +245,7 @@ const expire = (s, when, p) => { for (const i of allInPlay(s)) i.mods = i.mods.f
 function startTurn(s, first = false) {
   const p = s.active, P = s.players[p];
   expire(s, 'start', p);
+  s.locks = (s.locks || []).filter(l => l.by !== p);
   P.inkUsed = 0; P.inked = 0; P.inkDrops = 0; P.discounts = []; P.played = {}; P.playedList = []; P.extraInk = 0; s.banishedTurn = 0;
   // Redressement
   for (const i of [...P.play, ...P.items]) {
@@ -348,23 +353,24 @@ function triggerMatches(s, t, src, ev) {
   switch (t.on) {
     case 'play': return ev.inst === src;
     case 'quest': return ev.inst === src && (!t.atLocation || !!src.at);
-    case 'anyQuest': return mine(ev.inst) && (!t.other || ev.inst !== src) && hasCls(ev.inst, t.cls || null) && (!t.named || ev.inst.card.nameEn === t.named);
+    case 'anyQuest': if (t.side === 'opp') return ev.inst.owner !== src.owner;
+      return mine(ev.inst) && (!t.other || ev.inst !== src) && hasCls(ev.inst, t.cls || null) && (!t.named || ev.inst.card.nameEn === t.named);
     case 'questHere': return ev.inst.at === src.uid;
     case 'challenge':
       if (t.any) return mine(ev.attacker) && (!t.other || ev.attacker !== src) && hasCls(ev.attacker, t.cls || null);
-      return ev.attacker === src && (!t.defDamaged || ev.defender.damage > 0);
+      return ev.attacker === src && (!t.defDamaged || ev.defender.damage > 0) && (!t.defCls || hasCls(ev.defender, t.defCls));
     case 'challenged': return ev.defender === src;
     case 'allyChallenged': return mine(ev.defender) && ev.defender.card.kind === 'character';
-    case 'banishInChallenge': return ev.attacker === src && ev.defenderBanished;
+    case 'banishInChallenge': return (t.any ? mine(ev.attacker) && (!t.other || ev.attacker !== src) : ev.attacker === src) && ev.defenderBanished;
     case 'banished': return ev.inst === src && (!t.inChallenge || ev.inChallenge);
     case 'allyBanished': return ev.inst !== src && mine(ev.inst) && ev.inst.card.kind === (t.kind || 'character') && (!t.other || ev.inst !== src) && hasCls(ev.inst, t.cls || null) && (!t.kw || ownKw(ev.inst, t.kw)) && (!t.inChallenge || ev.inChallenge);
-    case 'anyBanished': return ev.inst !== src && ev.inst.card.kind === 'character' && (t.side !== 'opp' || ev.inst.owner !== src.owner);
+    case 'anyBanished': return ev.inst !== src && ev.inst.card.kind === (t.kind || 'character') && (t.side !== 'opp' || ev.inst.owner !== src.owner);
     case 'banishedHere': return ev.at === src.uid;
     case 'startTurn': case 'endTurn': return ev.player === src.owner;
     case 'youPlay':
       if (!mine(ev.inst) || ev.inst === src) return false;
       if (!typeMatch(ev.inst.card, t.type) || (t.cls && !hasCls(ev.inst, t.cls)) || (t.maxCost != null && ev.inst.card.cost > t.maxCost)) return false;
-      if ((t.kw && !ownKw(ev.inst, t.kw)) || (t.minStr && ev.inst.card.str < t.minStr)) return false;
+      if ((t.kw && !ownKw(ev.inst, t.kw)) || (t.minStr && ev.inst.card.str < t.minStr) || (t.notSong && ev.inst.card.isSong)) return false;
       return !t.second || s.players[src.owner].played.action === 2;
     case 'oppPlay': return ev.inst.owner !== src.owner && typeMatch(ev.inst.card, t.type);
     case 'readied': return ev.inst === src;
@@ -372,6 +378,7 @@ function triggerMatches(s, t, src, ev) {
     case 'move': return ev.inst === src;
     case 'left': return ev.inst === src;
     case 'challengeDamage': return ev.attacker === src;
+    case 'moveHere': return ev.location === src;
     case 'healed': return mine(ev.inst);
     case 'inked': case 'drew': return ev.player === src.owner;
     case 'damaged': return t.self ? ev.inst === src : ev.inst.owner !== src.owner && ev.inst.card.kind === 'character';
@@ -561,6 +568,8 @@ function resolve(s, p, effects, ctx, chosen) {
       }
       case 'discount': P.discounts.push({ n: e.n, type: e.type }); break;
       case 'lookBack': ctx.lookTop = e.top; break;
+      case 'lockPlay': (s.locks ||= []).push({ player: other(p), by: p, types: e.types }); log(s, p, `${O.name} ne peut plus jouer d'${e.types.map(t => ({ action: 'actions', item: 'objets' }[t])).join(' ni d\'')} jusqu'au prochain tour de ${P.name}.`); break;
+      case 'drawTo': { const n = Math.max(0, (e.match === 'opp' ? O.hand.length : e.n) - P.hand.length); if (n) { draw(s, p, n); log(s, p, `${P.name} pioche ${n} carte(s).`); } else ctx.lastDone = false; break; }
       case 'pickPlay': {
         const c = (ctx.looked || []).find(x => typeMatch(x.card, e.type) && x.card.battleLegal);
         if (!c) { ctx.lastDone = false; break; }
@@ -575,7 +584,7 @@ function resolve(s, p, effects, ctx, chosen) {
         if (!l) { ctx.lastDone = false; break; }
         const who = P.play.filter(i => i.at !== l.uid).sort((a, b) => (b === src) - (a === src) || a.exerted - b.exerted || loreOf(b, s) - loreOf(a, s));
         const go = (e.self ? who.filter(i => i === src).concat(who.filter(i => i !== src)) : who).slice(0, e.n);
-        for (const i of go) { i.at = l.uid; log(s, p, `${i.card.fullName} se rend à ${l.card.fullName}.`); fire(s, 'move', { inst: i, location: l }); }
+        for (const i of go) { i.at = l.uid; log(s, p, `${i.card.fullName} se rend à ${l.card.fullName}.`); fire(s, 'move', { inst: i, location: l }); fire(s, 'moveHere', { inst: i, location: l }); }
         if (!go.length) ctx.lastDone = false;
         break;
       }
@@ -626,7 +635,7 @@ function canBeChallengedBy(s, att, def) {
   if (!def.exerted && !kwOf(s, att, 'challengeReady')) return false;
   if (kwOf(s, def, 'evasive') && !kwOf(s, att, 'evasive') && !kwOf(s, att, 'alert')) return false;
   if (kwOf(s, def, 'unchallengeable') || restricted(s, def, 'be challenged')) return false;
-  for (const { src, ab } of statics(s)) if (ab.st === 'protect' && staticActive(s, src, ab) && appliesTo(s, src, ab.subj, def) && att.card.cost <= ab.maxCost) return false;
+  for (const { src, ab } of statics(s)) if (ab.st === 'protect' && staticActive(s, src, ab) && appliesTo(s, src, ab.subj, def) && (ab.maxCost != null ? att.card.cost <= ab.maxCost : ab.cls ? hasCls(att, ab.cls) : strOf(att, s) >= ab.minStr)) return false;
   return true;
 }
 
@@ -662,6 +671,7 @@ export function playOptions(s, p, uid) {
   const P = s.players[p]; const i = P.hand.find(x => x.uid === uid);
   if (!i || !isMyTurn(s, p) || !i.card.battleLegal) return [];
   if (i.card.abilities.some(ab => ab.kind === 'static' && ab.st === 'playUnless' && !condOk(s, { ...i, owner: p }, ab.cond))) return [];
+  if ((s.locks || []).some(l => l.player === p && l.types.includes(i.card.kind))) return [];
   const c = i.card, ink = inkAvailable(P), out = [];
   const cost = playCost(s, p, i);
   if (cost <= ink) out.push({ mode: 'normal', cost });
@@ -853,6 +863,7 @@ export function applyAction(s, a) {
       P.inkUsed += opt.cost; i.at = l.uid;
       log(s, p, `${i.card.fullName} se rend à ${l.card.fullName}.`);
       fire(s, 'move', { inst: i, location: l });
+      fire(s, 'moveHere', { inst: i, location: l });
       return { ok: true };
     }
     case 'end': {
@@ -906,8 +917,8 @@ function effectValue(s, p, effects, ctx = {}) {
     switch (e.k) {
       case 'damage': if (e.t.sel === 'each') v += valid.reduce((n, i) => n + (opp(i) ? (wilOf(i, s) - i.damage <= (e.n === 'selfStr' ? 2 : e.n) ? 3 + instValue(s, i) : 0.6) : -1.5), 0);
         else if (opp(best)) v += wilOf(best, s) - best.damage <= (e.n === 'selfStr' ? 2 : e.n) ? 4 + instValue(s, best) : 1; break;
-      case 'banish': if (e.t.sel === 'each') v += valid.reduce((n, i) => n + (opp(i) ? 1 : -1) * instValue(s, i), 0); else if (opp(best)) v += 3 + instValue(s, best); else if (best) v -= instValue(s, best); break;
-      case 'return': case 'toInk': case 'tuck': if (e.t.sel === 'each') v += valid.reduce((n, i) => n + (opp(i) ? 1 : -0.5) * instValue(s, i), 0); else if (opp(best)) v += 2 + instValue(s, best) * 0.8; break;
+      case 'banish': if (e.t.sel === 'each') v += valid.reduce((n, i) => n + (opp(i) ? 1 : -1) * instValue(s, i), 0); else if (opp(best)) v += 3 + instValue(s, best); else if (best) v -= instValue(s, best); else v -= valid.filter(i => !opp(i)).reduce((n, i) => n + instValue(s, i), 0); break;
+      case 'return': case 'toInk': case 'tuck': if (e.t.sel === 'each') v += valid.reduce((n, i) => n + (opp(i) ? 1 : -0.5) * instValue(s, i), 0); else if (opp(best)) v += 2 + instValue(s, best) * 0.8; else if (best) v -= 1 + instValue(s, best) * 0.3; else v -= valid.filter(i => !opp(i)).reduce((n, i) => n + instValue(s, i) * 0.5, 0); break;
       case 'exert': v += valid.filter(i => opp(i) && !i.exerted).length * 1.5; break;
       case 'ready': v += valid.filter(i => !opp(i) && i.exerted).reduce((n, i) => n + loreOf(i, s) * 1.5 + 0.5, 0); break;
       case 'mod': { const tot = e.mods.reduce((n, [st, x]) => n + x * (st === 'lore' ? 2 : 0.6), 0); v += Math.abs(tot) * Math.max(1, e.t.sel === 'each' ? valid.length : 1) * (valid.length ? 1 : 0); break; }
@@ -932,6 +943,8 @@ function effectValue(s, p, effects, ctx = {}) {
       case 'delayedBanish': v -= 2; break;
       case 'payInk': v -= e.n * 0.8 + (inkAvailable(P) < e.n ? 50 : 0); break;
       case 'noop': case 'lookBack': break;
+      case 'lockPlay': v += 1.5; break;
+      case 'drawTo': v += Math.max(0, (e.match === 'opp' ? O.hand.length : e.n) - P.hand.length) * 2; break;
       default: v += 0.3;
     }
   }
