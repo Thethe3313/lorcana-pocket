@@ -332,6 +332,28 @@ const endTurn = s => applyAction(s, { type: 'end' });
   play(s3, 'Rolly - Chubby Puppy');
   check('Rolly : personnage de la défausse mis dans l\'encrier', s3.players[0].inkwell.length === ink + 1 && !s3.players[0].discard.length);
 }
+// 21. Dégâts par personnage épuisé ; défausse de toute la main adverse ; protection temporaire
+{
+  const big = rows.find(r => r.card_type === 'Character' && !r.text_en && r.willpower >= 6);
+  const s = setup([filler, filler, byName('Light the Fuse')], [big]);
+  s.active = 1; play(s, big.full_name); endTurn(s);
+  play(s, filler.full_name); play(s, filler.full_name);
+  for (const i of s.players[0].play) i.exerted = true;
+  const t = s.players[1].play[0];
+  play(s, 'Light the Fuse', { target: t.uid });
+  check('Allumer la mèche : 1 dégât par personnage épuisé', t.damage === 2, `dégâts ${t.damage}`);
+
+  const s2 = setup([byName('Bend to My Will')], [filler, filler, filler]);
+  play(s2, 'Bend to My Will');
+  check('Plie-toi à ma volonté : l\'adversaire défausse toute sa main', s2.players[1].hand.length === 0 && s2.players[1].discard.length >= 3);
+
+  const s3 = setup([filler, byName('Safe and Sound')], [big]);
+  s3.active = 1; play(s3, big.full_name); endTurn(s3);
+  play(s3, filler.full_name);
+  const f = s3.players[0].play[0];
+  play(s3, 'Safe and Sound', { target: f.uid }); f.exerted = true; endTurn(s3);
+  check('Sain et sauf : le personnage ne peut pas être défié', !applyAction(s3, { type: 'challenge', uid: s3.players[1].play[0].uid, target: f.uid }).ok);
+}
 
 // 7. Parties complètes avec decks riches en objets, lieux et actions
 const pool = rows.filter(r => /^\d+$/.test(r.set_code) && parseCard(r).battleLegal);

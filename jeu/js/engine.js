@@ -127,6 +127,7 @@ function condOk(s, src, c, ctx = {}) {
     case 'oppTurnEvent': return (O.turnHits || []).includes(c.what);
     case 'ownTurnEvent': return (P.turnHits || []).includes(c.what);
     case 'usedDrop': return !!src.usedDrop;
+    case 'noInkTurn': return !P.inked;
     case 'inkSpent': return P.inkwell.length - P.inkUsed <= 0;
     case 'charsMax': return P.play.filter(i => i !== src).length <= c.n;
     // mots-clés imprimés ou donnés par un effet (pas les effets permanents, pour éviter les boucles entre deux cartes)
@@ -551,6 +552,7 @@ function resolve(s, p, effects, ctx, chosen) {
           if (ok) { O.hand.splice(O.hand.indexOf(ok), 1); O.discard.push(ok); log(s, p, `${O.name} défausse ${ok.card.name}.`); } else ctx.lastDone = false;
           break;
         }
+        if (e.random) { const Q = O; for (let k = 0; k < e.n && Q.hand.length; k++) { const c = Q.hand.splice(Math.floor(s.rnd() * Q.hand.length), 1)[0]; Q.discard.push(c); log(s, p, `${Q.name} défausse ${c.card.name} au hasard.`); } break; }
         for (const q of who) { const Q = s.players[q]; const d = chooseCardsToDiscard(Q, e.n); Q.discard.push(...d); if (d.length) log(s, p, `${Q.name} défausse ${d.map(x => x.card.name).join(', ')}.`); }
         if (e.who === 'you' && !P.hand.length) ctx.lastDone = true;
         break;
@@ -560,7 +562,7 @@ function resolve(s, p, effects, ctx, chosen) {
       case 'oppLore': if (statics(s).some(x => x.ab.st === 'noLoreLoss' && x.src.owner !== p && s.active === p)) break;
         O.lore = Math.max(0, O.lore - e.n); log(s, p, `${O.name} perd ${e.n} lore.`); break;
       case 'inkDrop': P.inkDrops = (P.inkDrops || 0) + e.n; log(s, p, `${P.name} gagne ${e.n} encre pour ce tour.`); break;
-      case 'ramp': for (const q of e.who === 'all' ? [0, 1] : [p]) {
+      case 'ramp': for (const q of e.who === 'all' ? [0, 1] : e.who === 'opp' ? [other(p)] : [p]) {
         const Q = s.players[q];
         for (let k = 0; k < e.n && Q.deck.length; k++) { Q.inkwell.push(Q.deck.pop()); if (s.active === q) Q.inkUsed++; }
         log(s, p, `${Q.name} ajoute ${e.n} carte(s) du deck à son encrier.`); fire(s, 'inked', { player: q });
@@ -581,7 +583,7 @@ function resolve(s, p, effects, ctx, chosen) {
       case 'pick': {
         const pool = ctx.looked || [];
         const ok = pool.filter(x => typeMatch(x.card, e.type)).sort((a, b) => cardValue(b.card) - cardValue(a.card));
-        const take = (e.all ? ok : ok.slice(0, 1)).filter(x => filterOk(x, e.f));
+        const take = (e.all ? ok : ok.slice(0, e.n || 1)).filter(x => filterOk(x, e.f));
         for (const c of take) { pool.splice(pool.indexOf(c), 1); P.hand.push(c); }
         if (take.length) log(s, p, `${P.name} ajoute ${take.map(c => c.card.name).join(', ')} à sa main.`); else ctx.lastDone = false;
         break;
@@ -600,10 +602,14 @@ function resolve(s, p, effects, ctx, chosen) {
       case 'discount': P.discounts.push({ n: e.n, type: e.type, types: e.types }); break;
       case 'lookBack': ctx.lookTop = e.top; break;
       case 'discardToInk': {
-        const c = P.discard.filter(x => typeMatch(x.card, e.type)).sort((a, b) => cardValue(a.card) - cardValue(b.card))[0];
-        if (!c) { ctx.lastDone = false; break; }
-        P.discard.splice(P.discard.indexOf(c), 1); P.inkwell.push(c); if (s.active === p) P.inkUsed++; log(s, p, `${c.card.fullName} passe de la défausse à l'encrier.`); fire(s, 'inked', { player: p }); break;
+        const got = P.discard.filter(x => typeMatch(x.card, e.type)).sort((a, b) => cardValue(a.card) - cardValue(b.card)).slice(0, e.n || 1);
+        if (!got.length) { ctx.lastDone = false; break; }
+        for (const c of got) { P.discard.splice(P.discard.indexOf(c), 1); P.inkwell.push(c); if (s.active === p) P.inkUsed++; }
+        log(s, p, `${got.length} carte(s) passent de la défausse à l'encrier.`); fire(s, 'inked', { player: p }); break;
       }
+      case 'inkToHand': { for (let k = 0; k < e.n && P.inkwell.length; k++) { const c = P.inkwell.splice(Math.floor(s.rnd() * P.inkwell.length), 1)[0]; P.hand.push(c); } P.inkUsed = Math.min(P.inkUsed, P.inkwell.length); log(s, p, `${P.name} reprend ${e.n} carte(s) de son encrier.`); break; }
+      case 'handToBottom': { const cards = e.all ? P.hand.splice(0) : chooseCardsToDiscard(P, 1); P.deck.unshift(...cards); log(s, p, `${P.name} place ${cards.length} carte(s) sous son deck.`); break; }
+      case 'drawFrom': { const n = tg[0]?.damage || 0; if (n) { draw(s, p, n); log(s, p, `${P.name} pioche ${n} carte(s).`); } else ctx.lastDone = false; break; }
       case 'shuffleBack': {
         const back = P.discard.filter(x => x.card.kind === 'character' && (!e.cls || hasCls(x, e.cls) || x.card.nameEn.includes(e.cls)));
         for (const c of back) P.discard.splice(P.discard.indexOf(c), 1);
@@ -622,7 +628,7 @@ function resolve(s, p, effects, ctx, chosen) {
         host.under.push(P.deck.pop()); log(s, p, `${P.name} glisse une carte sous ${host.card.fullName}.`);
         fire(s, 'putUnder', { inst: host }); break;
       }
-      case 'exertInk': P.inkUsed = P.inkwell.length; log(s, p, `${P.name} épuise son encrier.`); break;
+      case 'exertInk': P.inkUsed = P.inkwell.length; if (e.all) O.inkUsed = O.inkwell.length; log(s, p, `${P.name} épuise son encrier.`); break;
       case 'discardHand': { const Q = e.who === 'opp' ? O : P; Q.discard.push(...Q.hand.splice(0)); log(s, p, `${Q.name} défausse sa main.`); break; }
       case 'loreFrom': { const t = e.stat === 'location' ? ctx.ev?.location : tg[0]; if (!t) { ctx.lastDone = false; break; } const n = e.stat === 'damage' ? t.damage : loreOf(t, s); log(s, p, `${P.name} gagne ${n} lore (${name}).`); gainLore(s, p, n); break; }
       case 'tuckSelf': {
@@ -1027,6 +1033,9 @@ function effectValue(s, p, effects, ctx = {}) {
       case 'discardHand': v += e.who === 'opp' ? O.hand.length * 1.2 : -P.hand.length * 1.2; break;
       case 'discardToInk': v += P.discard.some(x => typeMatch(x.card, e.type)) ? 1.5 : 0; break;
       case 'shuffleBack': v += 0.2; break;
+      case 'inkToHand': v -= 1; break;
+      case 'handToBottom': v -= e.all ? P.hand.length : 0.3; break;
+      case 'drawFrom': v += (best?.damage || 0) * 1.8; break;
       case 'readyAll': v += P.play.filter(i => i.exerted).length * 1.5 - P.play.length * 0.8; break;
       case 'loreFrom': v += e.stat === 'location' ? 3 : best ? (e.stat === 'damage' ? best.damage : loreOf(best, s)) * 2.5 : 0; break;
       case 'tuckSelf': v -= ctx.src && isInPlay(s, ctx.src) ? instValue(s, ctx.src) : 0; break;

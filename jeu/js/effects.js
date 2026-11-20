@@ -164,6 +164,26 @@ const RULES = [
   ['for each (.+?), (?:you may )?draw a card', m => { const n = perOf(m[1]); return n && { k: 'draw', n }; }],
   ['(they|this character|he|she) may move (?:to a location|there) for free', m => ({ k: 'moveFree', n: 1, it: m[1] === 'they', self: m[1] !== 'they', there: /there/.test(m[0]) })],
   ["the challenging character's player discards all cards in their hand", () => ({ k: 'discardHand', who: 'opp' })],
+  ['banish all (opposing )?(items|locations)', m => ({ k: 'banish', t: { sel: 'each', side: m[1] ? 'opp' : 'any', types: [m[2].replace(/s$/, '')], f: {} } })],
+  [`${T} can't be challenged${DUR}`, m => ({ k: 'grant', t: target(m[1]), kws: [{ kw: 'unchallengeable', v: true }], dur: dur(m[2]) || 'untilYourNext' })],
+  ['(?:each|chosen) opponent discards all cards in their hand', () => ({ k: 'discardHand', who: 'opp' })],
+  ['(?:then, )?(?:each opponent|chosen opponent|that player) discards a card at random', () => ({ k: 'discard', n: 1, who: 'opp', random: true })],
+  ['(?:this turn, )?you may ink an additional card(?: this turn)?', () => ({ k: 'extraInk' })],
+  ['deal (\\d+) damage to each character in play', m => ({ k: 'damage', n: +m[1], t: {"sel":"each","side":"any","types":["character"],"f":{}} })],
+  ['each player exerts all the cards in their inkwell', () => ({ k: 'exertInk', all: true })],
+  ['each opponent puts the top (card|\\d+ cards) of their deck into their inkwell facedown and exerted', m => ({ k: 'ramp', n: parseInt(m[1]) || 1, who: 'opp' })],
+  ['put (\\d+) into your hand and the rest on the bottom of your deck(?: in any order)?', m => ({ k: 'pick', type: 'any', n: +m[1] })],
+  ['ready this character after the challenge', () => ({ k: 'ready', t: { sel: 'self' } })],
+  [`${T} gains? ((?:${KW_RE}, )+(?:and )?${KW_RE})${DUR}`, m => ({ k: 'grant', t: target(m[1]), kws: m[2].split(/, (?:and )?/).map(kwObj), dur: dur(m[3]) || 'turn' })],
+  ['put up to (\\d+) cards from your discard into your inkwell facedown and exerted', m => ({ k: 'discardToInk', type: 'any', n: +m[1] })],
+  [`deal (\\d+) damage to ${T} for each (.+)`, m => { const n = perOf(m[3], +m[1]); return n && { k: 'damage', n, t: target(m[2]) }; }],
+  ['your other characters gain "This character can challenge ready characters" this turn', () => ({ k: 'grant', t: {"sel":"each","side":"own","types":["character"],"f":{"other":true}}, kws: [{ kw: 'challengeReady', v: true }], dur: 'turn' })],
+  [`${T} gets ([+-]\\d+) \\{S\\} and gains "This character takes no damage from challenges"${DUR}`, m => ({ k: 'mod', t: target(m[1]), mods: [['str', +m[2]]], kws: [{ kw: 'noChallengeDamage', v: true }], dur: dur(m[3]) || 'turn' })],
+  ['look at (?:the cards in your inkwell|the top card of each opponent\'s deck)', () => ({ k: 'noop' })],
+  ['return (\\d+) cards at random from your inkwell to your hand', m => ({ k: 'inkToHand', n: +m[1] })],
+  ['put (a card|all the cards) (?:from|in) your hand on the bottom of your deck(?: in any order)?', m => ({ k: 'handToBottom', all: /all/.test(m[1]) })],
+  [`draw cards equal to the damage on ${T}`, m => ({ k: 'drawFrom', t: target(m[1]) })],
+  ['opposing damaged characters gain Reckless during their next turn', () => ({ k: 'grant', t: {"sel":"each","side":"opp","types":["character"],"f":{"damaged":true}}, kws: [{ kw: 'reckless', v: true }], dur: 'theirNext' })],
   // dégâts, bannissement, renvoi
   [`deal (\\d+) damage to ${T}`, m => ({ k: 'damage', n: +m[1], t: target(m[2]) })],
   [`deal damage to ${T} equal to (?:their|its|this character's) \\{S\\}`, m => ({ k: 'damage', n: 'selfStr', t: target(m[1]) })],
@@ -260,6 +280,9 @@ export function parseCond(s) {
   if (/^you have a character in play with more \{S\} than each opposing character(?: in play)?$/.test(s)) return { c: 'strongest' };
   if (/^you have a character or location in play with a card under them$/.test(s)) return { c: 'anyUnder' };
   if (/^you have an ink drop$/.test(s)) return { c: 'inkDrop' };
+  if (/^(?:he|she|it|they) (?:has|have) no damage$/.test(s)) return { c: 'noDamage' };
+  if ((m = s.match(/^you have fewer than (\d+) cards in your hand$/))) return { c: 'handMax', n: +m[1] - 1 };
+  if (/^you didn't put any cards into your inkwell this turn$/.test(s)) return { c: 'noInkTurn' };
   if (/^you removed an ink drop to play (?:her|him|them|it|this character|this action)$/.test(s)) return { c: 'usedDrop' };
   if (/^all cards in your inkwell are exerted$/.test(s)) return { c: 'inkSpent' };
   if (/^one of your characters took damage this turn$/.test(s)) return { c: 'ownTurnEvent', what: 'damaged' };
