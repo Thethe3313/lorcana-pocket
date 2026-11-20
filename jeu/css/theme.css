@@ -1,0 +1,166 @@
+/* =====================================================================
+   Direction artistique « nuit d'Illumineur »
+   Ciel étoilé, aurore aux six couleurs d'encre, filigranes dorés, verre bleu nuit.
+   Tout est dessiné en CSS : aucun visuel externe.
+   ===================================================================== */
+:root {
+  --bg: #070b22; --bg2: #0f1638; --panel: rgba(20, 28, 72, .78); --panel2: rgba(38, 48, 110, .9); --line: rgba(214, 178, 96, .28);
+  --text: #f6f1e3; --muted: #b3b6d9; --gold: #f5cf6b; --gold2: #b8862b; --gold3: #fff1c2;
+  --glow: 0 0 18px rgba(245, 207, 107, .35);
+}
+body {
+  background:
+    radial-gradient(900px 500px at 12% -5%, rgba(155, 79, 196, .30), transparent 60%),
+    radial-gradient(800px 480px at 90% 0%, rgba(26, 127, 208, .28), transparent 60%),
+    radial-gradient(1100px 700px at 50% 115%, rgba(42, 156, 86, .16), transparent 60%),
+    linear-gradient(180deg, #0b1030 0%, #070b22 45%, #05071a 100%);
+  background-color: #070b22;
+  background-attachment: fixed;
+}
+/* étoiles : deux couches qui scintillent en décalé */
+body::before, body::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+body::before {
+  background-image:
+    radial-gradient(1.4px 1.4px at 7% 12%, #fff 60%, transparent), radial-gradient(1px 1px at 23% 38%, #fff 60%, transparent),
+    radial-gradient(1.6px 1.6px at 41% 8%, #fff7d6 60%, transparent), radial-gradient(1px 1px at 58% 27%, #fff 60%, transparent),
+    radial-gradient(1.3px 1.3px at 76% 15%, #fff 60%, transparent), radial-gradient(1px 1px at 91% 42%, #dfe8ff 60%, transparent),
+    radial-gradient(1.2px 1.2px at 14% 66%, #fff 60%, transparent), radial-gradient(1px 1px at 35% 82%, #fff 60%, transparent),
+    radial-gradient(1.5px 1.5px at 63% 71%, #fff7d6 60%, transparent), radial-gradient(1px 1px at 84% 88%, #fff 60%, transparent),
+    radial-gradient(1px 1px at 50% 55%, #fff 60%, transparent), radial-gradient(1.2px 1.2px at 96% 70%, #fff 60%, transparent);
+  background-size: 520px 520px; opacity: .75; animation: twinkle 6s ease-in-out infinite;
+}
+body::after {
+  background-image:
+    radial-gradient(1px 1px at 18% 22%, #fff 60%, transparent), radial-gradient(1.8px 1.8px at 47% 47%, #ffe9a8 50%, transparent),
+    radial-gradient(1px 1px at 71% 63%, #fff 60%, transparent), radial-gradient(1.2px 1.2px at 88% 9%, #fff 60%, transparent),
+    radial-gradient(1px 1px at 29% 91%, #fff 60%, transparent), radial-gradient(1.4px 1.4px at 5% 49%, #dfe8ff 60%, transparent);
+  background-size: 370px 370px; opacity: .5; animation: twinkle 4.5s ease-in-out infinite reverse;
+}
+@keyframes twinkle { 50% { opacity: .25; } }
+main { position: relative; z-index: 1; }
+
+/* titres : or gravé */
+h1, .logo, .end-screen h1, .turn-banner {
+  background: linear-gradient(180deg, #fff6d8 0%, #f5cf6b 45%, #c08a2c 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 2px 0 rgba(0,0,0,.45)) drop-shadow(0 0 10px rgba(245,207,107,.25));
+}
+h1 { font-family: 'Cinzel Decorative', 'Cinzel', serif; font-weight: 700; }
+h2 { color: var(--gold3); }
+.logo { font-family: 'Cinzel Decorative', 'Cinzel', serif; font-size: 1.3rem; letter-spacing: .03em; position: relative; }
+.logo span { color: transparent; }
+.logo::after { content: '✦'; position: absolute; right: -14px; top: -6px; font-size: .55em; -webkit-text-fill-color: var(--gold3); color: var(--gold3); animation: sparkle 2.4s ease-in-out infinite; }
+@keyframes sparkle { 0%, 100% { opacity: 0; transform: scale(.4) rotate(0); } 50% { opacity: 1; transform: scale(1) rotate(90deg); } }
+
+/* barres haut et bas : verre nuit et liseré doré */
+.topbar, .tabbar { background: linear-gradient(180deg, rgba(14,19,52,.92), rgba(8,11,32,.92)); border-color: transparent; }
+.topbar { box-shadow: 0 1px 0 rgba(245,207,107,.45), 0 8px 24px rgba(0,0,0,.35); }
+.tabbar { box-shadow: 0 -1px 0 rgba(245,207,107,.45), 0 -8px 24px rgba(0,0,0,.35); }
+.tabbar a { transition: color .2s, background .2s; }
+.tabbar a.active { color: var(--gold); background: radial-gradient(circle at 50% 30%, rgba(245,207,107,.22), rgba(245,207,107,.04) 70%); box-shadow: inset 0 0 0 1px rgba(245,207,107,.45); }
+.tabbar a.active i { filter: drop-shadow(0 0 6px rgba(245,207,107,.8)); }
+.pill { background: linear-gradient(180deg, rgba(38,48,110,.9), rgba(20,28,72,.9)); border-color: rgba(245,207,107,.5); box-shadow: inset 0 1px 0 rgba(255,255,255,.12); }
+.pill b { color: var(--gold3); }
+
+/* panneaux : verre bleu nuit, cadre doré fin, petits rivets aux coins */
+.panel, .stat, .side-bar, .action-panel {
+  background: linear-gradient(160deg, rgba(34,44,104,.84), rgba(14,19,54,.88));
+  border-color: rgba(245,207,107,.38);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 10px 30px rgba(0,0,0,.35);
+}
+.panel, .action-panel { position: relative; }
+.panel::before, .action-panel::before {
+  content: ''; position: absolute; inset: 5px; border-radius: calc(var(--radius) - 4px); pointer-events: none;
+  border: 1px solid rgba(245,207,107,.14);
+  background:
+    radial-gradient(circle at 0 0, rgba(245,207,107,.6) 0 2px, transparent 3px),
+    radial-gradient(circle at 100% 0, rgba(245,207,107,.6) 0 2px, transparent 3px),
+    radial-gradient(circle at 0 100%, rgba(245,207,107,.6) 0 2px, transparent 3px),
+    radial-gradient(circle at 100% 100%, rgba(245,207,107,.6) 0 2px, transparent 3px);
+}
+.action-panel { position: fixed; }
+.stat b { font-family: 'Cinzel', serif; font-size: 1.45rem; text-shadow: var(--glow); }
+.choice.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold), 0 0 24px rgba(245,207,107,.3); }
+.choice:hover { border-color: rgba(245,207,107,.7); }
+
+/* boutons */
+.btn { background: linear-gradient(180deg, rgba(52,64,140,.95), rgba(28,36,88,.95)); border-color: rgba(245,207,107,.45);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 3px 10px rgba(0,0,0,.3); }
+.btn:hover:not(:disabled) { filter: brightness(1.18); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 0 14px rgba(245,207,107,.3); }
+.btn.gold { background: linear-gradient(180deg, #fff1c2 0%, #f5cf6b 35%, #c99236 70%, #a8741f 100%); color: #2a1700; border-color: #fff1c2;
+  text-shadow: 0 1px 0 rgba(255,255,255,.45); box-shadow: inset 0 1px 0 #fff, inset 0 -2px 0 rgba(120,80,10,.5), 0 4px 14px rgba(245,207,107,.35);
+  position: relative; overflow: hidden; }
+.btn.gold:not(:disabled)::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40%; left: -60%; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.65), transparent); animation: shine 3.5s ease-in-out infinite; }
+@keyframes shine { 0%, 60% { left: -60%; } 100% { left: 130%; } }
+.btn.danger { background: linear-gradient(180deg, #7a2236, #4a1222); border-color: rgba(255,140,160,.45); }
+.chip { background: rgba(15,22,56,.85); border-color: rgba(245,207,107,.28); }
+.chip.on { background: linear-gradient(180deg, rgba(245,207,107,.25), rgba(245,207,107,.08)); border-color: var(--gold); color: var(--gold3); box-shadow: 0 0 10px rgba(245,207,107,.25); }
+input[type=text], input[type=search], select { background: rgba(10,15,42,.9); border-color: rgba(245,207,107,.3); }
+input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(245,207,107,.18); }
+.progress { background: rgba(5,8,26,.8); border-color: rgba(245,207,107,.3); }
+.progress i { background: linear-gradient(90deg, #a8741f, #f5cf6b 60%, #fff1c2); box-shadow: 0 0 10px rgba(245,207,107,.6); }
+
+/* cartes : lueur dorée au survol */
+.card { box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 6px 18px rgba(0,0,0,.55); }
+.card-grid .card:hover { box-shadow: 0 0 0 2px rgba(245,207,107,.75), 0 0 24px rgba(245,207,107,.35), 0 12px 26px rgba(0,0,0,.6); }
+/* dos de carte : médaillon doré sur un tourbillon d'encres */
+.card-back {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(12,8,36,.15) 0 20%, rgba(245,207,107,.9) 21% 22.5%, rgba(12,8,36,.55) 23.5% 32%, rgba(245,207,107,.45) 33% 33.8%, rgba(12,8,36,.85) 35% 100%),
+    conic-gradient(from 0deg at 50% 50%, #9b4fc4, #1a7fd0, #2a9c56, #f4b223, #d4213d, #8a9bad, #9b4fc4);
+}
+
+/* boosters : reflet métallisé */
+.pack { border-color: rgba(255,241,194,.55); box-shadow: 0 14px 30px rgba(0,0,0,.55), inset 0 0 30px rgba(255,255,255,.12); }
+.pack::after { content: ''; position: absolute; inset: 0; pointer-events: none; mix-blend-mode: overlay;
+  background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.32) 45%, transparent 60%); background-size: 300% 100%; animation: foil 6s ease-in-out infinite; }
+@keyframes foil { 0%, 100% { background-position: 100% 0; } 50% { background-position: 0 0; } }
+.pack:hover { box-shadow: 0 0 0 2px var(--gold), 0 0 30px rgba(245,207,107,.45), 0 18px 34px rgba(0,0,0,.6); }
+.pack .art { box-shadow: 0 0 0 2px rgba(255,241,194,.7), 0 6px 18px rgba(0,0,0,.5); }
+.pack .title { font-family: 'Cinzel Decorative', 'Cinzel', serif; color: var(--gold3); text-shadow: 0 2px 6px #000, 0 0 12px rgba(245,207,107,.45); }
+
+/* ouverture de booster et fin de partie : halo magique qui tourne */
+.opening, .end-screen { background:
+  radial-gradient(circle at 50% 42%, rgba(245,207,107,.2), transparent 35%),
+  conic-gradient(from 0deg at 50% 42%, rgba(155,79,196,.2), rgba(26,127,208,.2), rgba(42,156,86,.2), rgba(244,178,35,.2), rgba(212,33,61,.2), rgba(155,79,196,.2)),
+  radial-gradient(circle at 50% 40%, #1b1e5e 0%, #05071a 75%); }
+.opening::before, .end-screen::before { content: ''; position: fixed; inset: -50%; pointer-events: none;
+  background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(255,241,194,.07) 0 6deg, transparent 6deg 18deg); animation: spin 50s linear infinite; }
+.opening > *, .end-screen > * { position: relative; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.end-screen h1 { font-size: 3.4rem; }
+.rarity-tag { color: var(--gold3); text-shadow: var(--glow); }
+
+/* fiches de carte : texte sur parchemin */
+.modal { background: radial-gradient(circle at 50% 30%, rgba(40,46,120,.65), rgba(4,6,18,.97) 70%); }
+.card-info .txt, .battle-zoom .ztext { background: linear-gradient(180deg, #f6ecd0, #e9d9ae); color: #2b2111; border: 1px solid #c9a24a; box-shadow: inset 0 0 18px rgba(150,110,40,.25); }
+.battle-zoom { background: radial-gradient(circle at 50% 30%, rgba(40,46,120,.7), rgba(4,6,18,.97) 70%); }
+
+/* ---------- Combat : tapis de jeu ---------- */
+.board .zone {
+  border: 1px solid rgba(245,207,107,.22); border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 0 34%, rgba(245,207,107,.08) 34.3% 34.7%, transparent 35%),
+    radial-gradient(ellipse at 50% 50%, rgba(245,207,107,.07), transparent 65%),
+    linear-gradient(180deg, rgba(20,28,72,.5), rgba(10,14,40,.6));
+  box-shadow: inset 0 0 40px rgba(0,0,0,.45);
+}
+.side-bar .who { color: var(--gold3); }
+.drop { background: radial-gradient(circle at 35% 35%, #e9fbff, #6ad1ff 45%, #1a7fd0); box-shadow: 0 0 8px rgba(106,209,255,.9); }
+.drop.used { background: #1c2552; box-shadow: inset 0 0 0 1px rgba(106,209,255,.3); }
+.slot .chips span { background: rgba(8,12,34,.9); border-color: rgba(245,207,107,.35); }
+.slot.can-act .card { box-shadow: 0 0 0 2px #fff1c2, 0 0 18px 4px rgba(245,207,107,.7); animation: breathe 2.2s ease-in-out infinite; }
+@keyframes breathe { 50% { box-shadow: 0 0 0 2px #fff1c2, 0 0 28px 8px rgba(245,207,107,.4); } }
+.hand .card.playable { box-shadow: 0 0 0 2px #9ff0cf, 0 0 14px rgba(76,212,152,.65); }
+.targeting-bar { background: linear-gradient(180deg, #d4213d, #8f1228); box-shadow: 0 0 0 1px rgba(255,241,194,.6), 0 8px 24px rgba(0,0,0,.5); }
+.toast { background: linear-gradient(180deg, rgba(38,48,110,.97), rgba(20,28,72,.97)); box-shadow: 0 0 0 1px var(--gold), 0 0 24px rgba(245,207,107,.3); }
+
+@media (prefers-reduced-motion: reduce) {
+  body::before, body::after, .btn.gold::after, .pack::after, .opening::before, .end-screen::before, .slot.can-act .card, .logo::after { animation: none; }
+}
+
+@media (max-width: 600px) {
+  .logo { font-size: .98rem; letter-spacing: 0; }
+  .logo::after { right: -10px; }
+  .end-screen h1 { font-size: 2.4rem; }
+}
