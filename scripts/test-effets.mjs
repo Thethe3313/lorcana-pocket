@@ -261,6 +261,33 @@ const endTurn = s => applyAction(s, { type: 'end' });
   check('Zeus avec une carte dessous : +2 force, +2 volonté', strOf(z, s) === zeus.strength + 2 && wilOf(z, s) === zeus.willpower + 2, `${strOf(z, s)}/${wilOf(z, s)}`);
   check('Boost une seule fois par tour', !applyAction(s, { type: 'activate', uid: z.uid, index: idx }).ok);
 }
+// 18. « Quand un de tes autres personnages est banni » ; soin « de cette façon » ; retour en main après un défi perdu
+{
+  const lyle = byName('Lyle Tiberius Rourke - Cunning Mercenary');
+  const s = setup([lyle, filler, byName('Smash')]);
+  s.players[1].lore = 5;
+  play(s, lyle.full_name); play(s, filler.full_name);
+  const f = s.players[0].play.find(x => x.card.id === filler.id);
+  play(s, 'Smash', { target: f.uid });
+  check('Lyle : un autre personnage banni, l\'adversaire perd 1 lore', s.players[1].lore === 4, `lore ${s.players[1].lore}`);
+
+  const jul = byName('Julieta Madrigal - Excellent Cook');
+  const s2 = setup([filler, jul]);
+  play(s2, filler.full_name);
+  const hurt = s2.players[0].play[0]; hurt.damage = 1;
+  const hand = s2.players[0].hand.length;
+  play(s2, jul.full_name, { target: hurt.uid });
+  check('Julieta : soigne puis pioche', hurt.damage === 0 && s2.players[0].hand.length === hand, `dégâts ${hurt.damage}, main ${hand} -> ${s2.players[0].hand.length}`);
+
+  const big = rows.find(r => r.card_type === 'Character' && !r.text_en && r.strength >= 5 && r.willpower >= 5);
+  const s3 = setup([filler, byName('Forest Duel')], [big]);
+  s3.active = 1; play(s3, big.full_name); endTurn(s3);
+  play(s3, filler.full_name); endTurn(s3); s3.players[1].play[0].exerted = true; endTurn(s3);
+  play(s3, 'Forest Duel');
+  const att = s3.players[0].play[0];
+  applyAction(s3, { type: 'challenge', uid: att.uid, target: s3.players[1].play[0].uid });
+  check('Duel en forêt : le personnage banni en défi revient en main', s3.players[0].hand.includes(att) && !s3.players[0].discard.includes(att));
+}
 
 // 7. Parties complètes avec decks riches en objets, lieux et actions
 const pool = rows.filter(r => /^\d+$/.test(r.set_code) && parseCard(r).battleLegal);
