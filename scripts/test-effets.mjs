@@ -288,6 +288,29 @@ const endTurn = s => applyAction(s, { type: 'end' });
   applyAction(s3, { type: 'challenge', uid: att.uid, target: s3.players[1].play[0].uid });
   check('Duel en forêt : le personnage banni en défi revient en main', s3.players[0].hand.includes(att) && !s3.players[0].discard.includes(att));
 }
+// 19. Quêter dès l'arrivée ; défier un personnage redressé blessé ; condition sur ce qui s'est passé dans le tour
+{
+  const s = setup([byName('Dash Parr - Lava Runner')]);
+  play(s, 'Dash Parr - Lava Runner');
+  check('Dash : quête le tour où il est joué', applyAction(s, { type: 'quest', uid: s.players[0].play[0].uid }).ok);
+
+  const s2 = setup([byName('Gizmoduck - Suited Up')], [filler, filler]);
+  s2.active = 1; play(s2, filler.full_name); play(s2, filler.full_name); endTurn(s2);
+  play(s2, 'Gizmoduck - Suited Up'); endTurn(s2); endTurn(s2);
+  const [a, b] = s2.players[1].play; a.damage = 1;
+  const g = s2.players[0].play[0];
+  check('Gizmoduck ne peut pas défier un personnage redressé indemne', !applyAction(s2, { type: 'challenge', uid: g.uid, target: b.uid }).ok);
+  check('Gizmoduck peut défier un personnage redressé blessé', applyAction(s2, { type: 'challenge', uid: g.uid, target: a.uid }).ok);
+
+  const chief = byName('Chief - Seasoned Tracker');
+  const s3 = setup([chief, byName('Smash')], [filler]);
+  s3.active = 1; play(s3, filler.full_name); endTurn(s3);
+  play(s3, chief.full_name); endTurn(s3); endTurn(s3);
+  const c = s3.players[0].play[0], idx = c.card.abilities.findIndex(x => x.kind === 'activated');
+  const h0 = s3.players[0].hand.length;
+  applyAction(s3, { type: 'activate', uid: c.uid, index: idx });
+  check('Chef : pas de pioche sans bannissement en défi ce tour-ci', s3.players[0].hand.length === h0);
+}
 
 // 7. Parties complètes avec decks riches en objets, lieux et actions
 const pool = rows.filter(r => /^\d+$/.test(r.set_code) && parseCard(r).battleLegal);
