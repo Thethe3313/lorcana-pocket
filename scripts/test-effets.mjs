@@ -218,6 +218,35 @@ const endTurn = s => applyAction(s, { type: 'end' });
   endTurn(s2); const lore = s2.players[0].lore; endTurn(s2);
   check('Vanellope au lieu : +1 lore au début du tour', s2.players[0].lore === lore + loc.lore + 1, `${lore} -> ${s2.players[0].lore}`);
 }
+// 16. Bonus pendant un défi ; aucun dégât reçu ; lore égal à celui d'un adversaire ; protection d'un personnage nommé
+{
+  const big = rows.find(r => r.card_type === 'Character' && !r.text_en && r.strength === 3 && r.willpower >= 5);
+  const s = setup([big], [byName('Flora - Good Fairy')]);
+  s.active = 1; play(s, 'Flora - Good Fairy'); endTurn(s); play(s, big.full_name); endTurn(s);
+  const flora = s.players[1].play[0]; flora.exerted = true; endTurn(s);
+  const att = s.players[0].play[0];
+  applyAction(s, { type: 'challenge', uid: att.uid, target: flora.uid });
+  check('Flora défiée : +2 force (4 dégâts rendus)', att.damage === 4, `dégâts ${att.damage}`);
+
+  const smee = byName('Mr. Smee - Loyal First Mate');
+  const s2 = setup([byName("Peter Pan - Pirate's Bane")], [smee]);
+  s2.active = 1; play(s2, smee.full_name); endTurn(s2); play(s2, "Peter Pan - Pirate's Bane"); endTurn(s2);
+  s2.players[1].play[0].exerted = true; endTurn(s2);
+  const pp = s2.players[0].play[0];
+  applyAction(s2, { type: 'challenge', uid: pp.uid, target: s2.players[1].play[0].uid });
+  check('Peter Pan défie un Pirate sans subir de dégâts', pp.damage === 0, `dégâts ${pp.damage}`);
+
+  const s3 = setup([byName('Abu - Illusory Pachyderm')], [byName('Peter Pan - Pirate\'s Bane')]);
+  s3.active = 1; play(s3, "Peter Pan - Pirate's Bane"); endTurn(s3); play(s3, 'Abu - Illusory Pachyderm'); endTurn(s3); endTurn(s3);
+  applyAction(s3, { type: 'quest', uid: s3.players[0].play[0].uid });
+  check('Abu : lore + lore du personnage adverse (1 + 2)', s3.players[0].lore === 3, `lore ${s3.players[0].lore}`);
+
+  const s4 = setup([big], [byName('Kenai - Big Brother'), byName('Koda - Smallish Bear')]);
+  s4.active = 1; play(s4, 'Kenai - Big Brother'); play(s4, 'Koda - Smallish Bear'); endTurn(s4); play(s4, big.full_name); endTurn(s4);
+  for (const i of s4.players[1].play) i.exerted = true; endTurn(s4);
+  const koda = s4.players[1].play.find(i => i.card.name === 'Koda');
+  check('Kenai épuisé : Koda ne peut pas être défié', !applyAction(s4, { type: 'challenge', uid: s4.players[0].play[0].uid, target: koda.uid }).ok);
+}
 
 // 7. Parties complètes avec decks riches en objets, lieux et actions
 const pool = rows.filter(r => /^\d+$/.test(r.set_code) && parseCard(r).battleLegal);
