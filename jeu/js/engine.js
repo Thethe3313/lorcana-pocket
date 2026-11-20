@@ -110,6 +110,10 @@ function count(s, p, what, src) {
     case 'oppHand': return s.players[other(p)].hand.length;
     case 'evAmount': return what._ctx?.ev?.amount || 0;
     case 'discardedWay': return what._ctx?.discardedWay || 0;
+    case 'movedDamage': return what._ctx?.movedDamage || 0;
+    case 'discardedActions': return what._ctx?.discardedActions || 0;
+    case 'milledItems': return what._ctx?.milledItems || 0;
+    case 'itUnderWas': return what._ctx?.it?._underWas || 0;
     case 'evCards': return what._ctx?.ev?.cards?.length || 0;
     case 'oppDamageTotal': return s.players[other(p)].play.reduce((n, i) => n + i.damage, 0);
     case 'inkCount': return P.inkwell.length;
@@ -122,7 +126,7 @@ function count(s, p, what, src) {
     case 'itemsDistinct': return new Set(P.items.map(i => i.card.nameEn)).size;
     case 'healedWay': return what._ctx?.healedAmt || 0;
     case 'under': return src?.under?.length || 0;
-    case 'locations': return P.locations.length;
+    case 'locations': return Math.max(0, P.locations.length - (what.minus || 0));
     case 'discardType': return P.discard.filter(x => typeMatch(x.card, what.type)).length;
     case 'charsF': return (what.side === 'opp' ? s.players[other(p)] : P).play.filter(i => (!what.other || i !== src) && (!what.cls || hasCls(i, what.cls))
       && (!what.kw || ownKw(i, what.kw)) && (!what.named || i.card.nameEn === what.named) && (what.strExact == null || strOf(i, s) === what.strExact) && (what.state !== 'damaged' || i.damage > 0) && (what.state !== 'exerted' || i.exerted) && (what.state !== 'undamaged' || !i.damage) && (what.state !== 'ready' || !i.exerted) && (!what.here || (src && i.at === src.uid))).length;
@@ -164,6 +168,11 @@ function condOk(s, src, c, ctx = {}) {
     case 'singers': return (src._singers || []).length >= c.n;
     case 'oppDeclined': return !!ctx.oppDeclined;
     case 'not': return !condOk(s, src, c.of, ctx);
+    case 'itType': return !!ctx.it && typeMatch(ctx.it.card, c.type);
+    case 'movedCls': return (ctx.movedCards || []).some(x => hasCls(x, c.cls) || x.card.cls.includes(c.cls));
+    case 'hadExertedHere': return !!(ctx.banishedCard || src)._exHere;
+    case 'evNameInDiscard': { const it = ctx.ev?.inst; return !!it && P.discard.some(x => x !== it && x.card.nameEn === it.card.nameEn); }
+    case 'underWasChar': return ((ctx.banishedCard || src)._underCards || []).some(x => x.card.kind === 'character');
     case 'nthDraw': return (s.players[c.opp ? s.active : p].drawnTurn || 0) === c.n;
     case 'nthInk': return (P.inkedTurn || 0) === c.n;
     case 'evHandMin': return s.players[ctx.ev?.player ?? other(p)].hand.length >= c.n;
@@ -247,7 +256,7 @@ function appliesTo(s, src, subj, inst, cond) {
     case 'challenger': return s.inChallenge?.defender === src && s.inChallenge.attacker === inst;
     case 'ownItems': return inst.card.kind === 'item' && inst.owner === src.owner && (!f.named || inst.card.nameEn === f.named);
     case 'oppItems': return inst.card.kind === 'item' && inst.owner !== src.owner;
-    case 'ownLocations': return inst.card.kind === 'location' && inst.owner === src.owner && (!f.nameHas || inst.card.nameEn.includes(f.nameHas));
+    case 'ownLocations': return inst.card.kind === 'location' && inst.owner === src.owner && (!f.nameHas || inst.card.nameEn.includes(f.nameHas)) && (!f.other || inst !== src);
     case 'ownLocOrAtLoc': return inst.owner === src.owner && (inst.card.kind === 'location' || (inst.card.kind === 'character' && !!inst.at));
     case 'own':
       return inst.card.kind === 'character' && inst.owner === src.owner && (!f.other || inst !== src)
@@ -292,9 +301,11 @@ function kwOf(s, inst, k) {
 }
 const numKw = (s, inst, k) => { const v = kwOf(s, inst, k); return typeof v === 'number' ? v : 0; };
 
+const lostAbility = (s, inst, ab) => !!ab.label && statics(s).some(({ src, ab: x }) => x.st === 'loseAbility' && src.owner === inst.owner && hasCls(inst, x.cls) && ab.label.toUpperCase().startsWith(x.label));
 function restricted(s, inst, what) {
   if (inst.mods.some(m => m.restrict === what || (m.restrict === 'quest or challenge' && (what === 'quest' || what === 'challenge')))) return true;
   for (const { src, ab } of statics(s)) {
+    if (lostAbility(s, src, ab)) continue;
     if (ab.st !== 'cant' || !(ab.what === what || (ab.what === 'quest or challenge' && (what === 'quest' || what === 'challenge'))) || !staticActive(s, src, ab) || !appliesTo(s, src, ab.subj, inst, ab.cond)) continue;
     if (ab.unless && condOk(s, src, ab.unless)) continue;
     return true;
@@ -381,6 +392,7 @@ function lose(s, p, reason) {
 
 function gainLore(s, p, n) {
   if (n <= 0) return;
+  if (statics(s).some(({ src, ab }) => ab.st === 'noLoreUnlessChallenged' && src.owner !== p && staticActive(s, src, ab)) && !(s.players[p].turnLog || []).some(x => x.what === 'challenged')) return;
   const P = s.players[p];
   P.lore += n;
   const need = Math.max(RULES.LORE_TO_WIN, ...statics(s).filter(({ src, ab }) => ab.st === 'loreToWin' && src.owner !== p).map(({ ab }) => ab.n));
@@ -393,7 +405,8 @@ function leavePlay(s, inst) {
   if (idx < 0) return false;
   z.splice(idx, 1);
   if (inst.card.kind === 'location') for (const c of P.play) if (c.at === inst.uid) c.at = null;
-  inst._underWas = inst.under.length;
+  inst._underWas = inst.under.length; inst._underCards = [...inst.under];
+  if (inst.card.kind === 'location') inst._exHere = P.play.some(c => c.at === inst.uid && c.exerted);
   P.discard.push(...inst.under); inst.under = [];
   for (const i of allInPlay(s)) if (i.mods.some(m => m.exp?.uid === inst.uid)) i.mods = i.mods.filter(m => m.exp?.uid !== inst.uid);
   return true;
@@ -416,6 +429,7 @@ function banish(s, inst, why = 'est banni', ctx = {}) {
 
 function dealDamage(s, inst, n, ctx = {}) {
   if (n <= 0 || !isInPlay(s, inst)) return 0;
+  if (!ctx.redirected && inst.card.kind === 'character') { const g = s.players[inst.owner].play.find(x => x !== inst && x.card.abilities.some(ab => ab.st === 'redirectDamage')); if (g) { log(s, inst.owner, `${g.card.fullName} prend les dégâts à la place.`); return dealDamage(s, g, n, { ...ctx, redirected: true }); } }
   { const sh = inst.mods.find(m => m.kw === 'shieldOnce'); if (sh) { inst.mods = inst.mods.filter(m => m !== sh); log(s, inst.owner, `${inst.card.fullName} ne subit aucun dégât.`); return 0; } }
   if (inst.card.abilities.some(ab => ab.st === 'firstDamageImmune') && s.active !== inst.owner && !inst.once.shield) { inst.once.shield = true; return 0; }
   for (const { src, ab } of statics(s)) if (ab.st === 'noDamage' && staticActive(s, src, ab) && appliesTo(s, src, ab.subj, inst) && !(ab.unlessChallenged && ctx.inChallenge && s.lastChallenge?.defender === inst)) return 0;
@@ -564,6 +578,7 @@ function candidates(s, p, t, ctx) {
     if (f.challengedTurn && i.challengedTurn !== s.turnNumber) return false;
     if (f.maxstrSelf && strOf(i, s) > (src?._lastStr ?? src?.card.str ?? 0)) return false;
     if (f.maxCostSelfStr && i.card.cost > (src ? strOf(src, s) : 0)) return false;
+    if (f.bodyguardOrItem && !(i.card.kind === 'item' || kwOf(s, i, 'bodyguard'))) return false;
     return true;
   });
 }
@@ -580,7 +595,7 @@ function targetsFor(s, p, e, ctx, chosen) {
   if (!t) return [];
   switch (t.sel) {
     case 'self': return ctx.src && isInPlay(s, ctx.src) ? [ctx.src] : [];
-    case 'it': return ctx.them?.length ? ctx.them.filter(i => isInPlay(s, i)) : ctx.it && isInPlay(s, ctx.it) ? [ctx.it] : [];
+    case 'it': return ctx.them?.length ? ctx.them.filter(i => isInPlay(s, i)) : ctx.it && isInPlay(s, ctx.it) ? [ctx.it] : t.selfFallback && ctx.src && isInPlay(s, ctx.src) ? [ctx.src] : [];
     case 'otherMoved': return ctx.otherMoved && isInPlay(s, ctx.otherMoved) ? [ctx.otherMoved] : [];
     case 'loc': { const l = ctx.loc || ctx.ev?.location || (ctx.src?.at ? findInst(s, ctx.src.at)?.inst : null); return l && isInPlay(s, l) ? [l] : []; }
     case 'healedList': return (ctx.healedList || []).filter(i => isInPlay(s, i));
@@ -681,7 +696,7 @@ function resolve(s, p, effects, ctx, chosen) {
         log(s, p, `${who.map(q => s.players[q].name).join(' et ')} pioche(nt) ${n} carte(s).`);
         break;
       }
-      case 'loot': { draw(s, p, e.n); const d = chooseCardsToDiscard(P, e.n2); P.discard.push(...d); if (d.length) fire(s, 'discarded', { player: p, cards: d }); } log(s, p, `${P.name} pioche ${e.n} carte(s) puis en défausse ${e.n2}.`); break;
+      case 'loot': { draw(s, p, e.n); const d = chooseCardsToDiscard(P, e.n2); P.discard.push(...d); if (d.length) ctx.it = d[0]; if (d.length) fire(s, 'discarded', { player: p, cards: d }); } log(s, p, `${P.name} pioche ${e.n} carte(s) puis en défausse ${e.n2}.`); break;
       case 'discard': {
         const who = e.who === 'all' ? [0, 1] : e.who === 'opp' ? [other(p)] : [p];
         if (e.pick) { // défausse choisie par le joueur de l'effet, parmi les cartes du bon type
@@ -754,21 +769,64 @@ function resolve(s, p, effects, ctx, chosen) {
           if (c2) { z.splice(z.indexOf(c2), 1); Q.hand.push(c2); log(s, p, `${Q.name} joue ${c2.card.fullName} gratuitement.`); putIntoPlay(s, q, c2, {}); }
           if (e.who === 'itOwner') break; }
         const zone = e.either ? [...P.hand, ...P.discard] : e.fromDiscard ? P.discard : e.fromInk ? P.inkwell : P.hand;
-        const max = e.max === 'itCost' ? (ctx.it?.card.cost ?? -1) : e.max;
+        const max = e.max === 'itCost' ? (ctx.it?.card.cost ?? -1) : e.max === 'itCostPlus' ? (ctx.it ? ctx.it.card.cost + e.plus : -1) : e.max;
         const c = zone.filter(x => typeMatch(x.card, e.type) && x.card.cost <= max && (!e.sameNameIt || x.card.nameEn === ctx.it?.card.nameEn) && x.card.battleLegal && filterOk(x, e.f)).sort((a, b) => b.card.cost - a.card.cost || cardValue(b.card) - cardValue(a.card))[0];
+        if (c && c.card.kind === 'location') ctx.loc = c;
         if (c) { if (P.discard.includes(c)) { P.discard.splice(P.discard.indexOf(c), 1); P.hand.push(c); fire(s, 'leftDiscard', { player: p }); } if (P.inkwell.includes(c)) { P.inkwell.splice(P.inkwell.indexOf(c), 1); P.inkUsed = Math.min(P.inkUsed, P.inkwell.length); P.hand.push(c); } log(s, p, `${P.name} joue ${c.card.fullName} gratuitement${e.fromDiscard ? ' depuis sa défausse' : ''}.`); putIntoPlay(s, p, c, {}); if (e.exerted && isInPlay(s, c)) c.exerted = true; } else ctx.lastDone = false;
         break;
       }
       case 'discount': P.discounts.push({ n: e.n === 'num' ? (ctx.num || 0) : amount(s, p, e.n, src, ctx), type: e.type, types: e.types, named: e.named }); break;
-      case 'lookBack': ctx.lookTop = e.top; break;
+      case 'lookBack': if (e.discard) ctx.lookDiscard = true; else ctx.lookTop = e.top; break;
       case 'mark': break;
+      case 'itToBottom': { const c = ctx.it; if (!c) break; const Q = s.players[c.owner]; const k = Q.discard.indexOf(c); if (k >= 0) { Q.discard.splice(k, 1); Q.deck.unshift(c); } break; }
+      case 'underToInk': { let n = 0; for (const h of [...P.play, ...P.locations]) { n += h.under.length; P.inkwell.push(...h.under.splice(0)); } if (n) { if (s.active === p) P.inkUsed += n; fire(s, 'inked', { player: p }); } break; }
+      case 'discardUnder': { const c = P.discard.filter(x => x.card.kind === 'character').sort((a, b) => cardValue(b.card) - cardValue(a.card))[0]; if (!c || !src || !isInPlay(s, src)) { ctx.lastDone = false; break; } P.discard.splice(P.discard.indexOf(c), 1); src.under.push(c); fire(s, 'leftDiscard', { player: p }); break; }
+      case 'playFromUnder': {
+        const c = (src?.under || []).filter(x => x.card.kind === 'character' && x.card.battleLegal && playCost(s, p, x) <= inkAvailable(P)).sort((a, b) => cardValue(b.card) - cardValue(a.card))[0];
+        if (!c) { ctx.lastDone = false; break; }
+        const cost = playCost(s, p, c); const d = Math.min(P.inkDrops || 0, cost); P.inkDrops -= d; P.inkUsed += cost - d;
+        src.under.splice(src.under.indexOf(c), 1); P.hand.push(c); log(s, p, `${P.name} joue ${c.card.fullName} depuis le chaudron.`); putIntoPlay(s, p, c, {}); break;
+      }
+      case 'moveUnderWas': { const from = ctx.banishedCard || src; const cards = (from._underCards || []).filter(c => P.discard.includes(c)); const host = [...P.play, ...P.locations].filter(i => i !== from).sort((a, b) => cardValue(b.card) - cardValue(a.card))[0]; if (!host || !cards.length) { ctx.lastDone = false; break; } for (const c of cards) P.discard.splice(P.discard.indexOf(c), 1); host.under.push(...cards); fire(s, 'putUnder', { inst: host }); break; }
+      case 'playUnderWas': { const from = ctx.banishedCard || src; for (const c of (from._underCards || []).filter(c => c.card.kind === 'character' && P.discard.includes(c) && c.card.battleLegal)) { P.discard.splice(P.discard.indexOf(c), 1); P.hand.push(c); log(s, p, `${P.name} joue ${c.card.fullName} gratuitement.`); putIntoPlay(s, p, c, {}); } break; }
+      case 'recurNamed': {
+        const freq = {}; for (const c of P.discard.filter(x => x.card.kind === 'character')) freq[c.card.nameEn] = (freq[c.card.nameEn] || 0) + 1;
+        const nm = Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0]; if (!nm) { ctx.lastDone = false; break; }
+        const got = P.discard.filter(x => x.card.kind === 'character' && x.card.nameEn === nm); for (const c of got) P.discard.splice(P.discard.indexOf(c), 1); P.hand.push(...got);
+        log(s, p, `${P.name} nomme « ${got[0].card.name} » et récupère ${got.length} carte(s).`); fire(s, 'leftDiscard', { player: p }); break;
+      }
+      case 'pickedPlay': { const c = P.hand[P.hand.length - 1]; if (c && c.card.kind === 'item' && c.card.cost <= e.max && c.card.battleLegal) { putIntoPlay(s, p, c, {}); c.exerted = true; log(s, p, `${P.name} joue ${c.card.fullName} gratuitement.`); } break; }
+      case 'eachDrawDiscard': { let acts = 0; for (const q of [p, other(p)]) { const Q = s.players[q]; draw(s, q, e.n); for (let k = 0; k < e.d && Q.hand.length; k++) { const c = Q.hand.splice(Math.floor(s.rnd() * Q.hand.length), 1)[0]; Q.discard.push(c); if (c.card.kind === 'action' && q === p) acts++; } } ctx.discardedActions = acts; log(s, p, `Chaque joueur pioche ${e.n} cartes puis en défausse ${e.d} au hasard.`); break; }
+      case 'markOwn': ctx.them = [...P.play].sort((a, b) => a.card.cost - b.card.cost).slice(0, e.n); break;
+      case 'returnMarked': { const list = ctx.them || []; if (!list.some(i => i.card.cost <= e.maxCost)) { ctx.lastDone = false; break; } for (const t of list) if (leavePlay(s, t)) { P.hand.push(resetInst(t)); fire(s, 'returned', { inst: t }); } break; }
+      case 'scatter': { const list = [...O.play].sort((a, b) => instValue(s, a) - instValue(s, b)).slice(0, 3); const [a, b, c] = list; if (a && leavePlay(s, a)) O.deck.push(resetInst(a)); if (b && leavePlay(s, b)) O.deck.unshift(resetInst(b)); if (c && leavePlay(s, c)) O.hand.push(resetInst(c)); log(s, p, `${O.name} disperse ${list.length} personnage(s).`); break; }
+      case 'inkDropOpp': O.inkDrops = (O.inkDrops || 0) + e.n; break;
+      case 'drawDrops': draw(s, p, 1); P.inkDrops = (P.inkDrops || 0) + e.n; P.gotDropTurn = true; break;
+      case 'banishTotal': { let left = e.n; for (const t of [...O.play].filter(i => !kwOf(s, i, 'ward')).sort((a, b) => instValue(s, b) - instValue(s, a))) { const st = strOf(t, s); if (st <= left) { left -= st; banish(s, t, `est banni (${name})`); } } break; }
+      case 'weKnow': {
+        const ref = [...P.discard].sort((a, b) => cardValue(b.card) - cardValue(a.card))[0]; if (!ref) break;
+        P.discard.splice(P.discard.indexOf(ref), 1); P.deck.push(ref); shuffle(P.deck, s.rnd);
+        const top = P.deck[P.deck.length - 1];
+        if (top && top.card.nameEn === ref.card.nameEn && top.card.battleLegal) { P.deck.pop(); P.hand.push(top); log(s, p, `${P.name} révèle ${top.card.name} et le joue gratuitement.`); putIntoPlay(s, p, top, {}); }
+        break;
+      }
+      case 'jackjack': { const c = P.deck.pop(); if (!c) break; P.discard.push(c); const kind = c.card.kind; const t = src && isInPlay(s, src) ? src : null;
+        if (kind === 'character' && t) t.mods.push({ stat: 'str', n: 2, exp: { when: 'end', player: p } });
+        else if ((kind === 'action' || kind === 'item') && t) t.mods.push({ stat: 'lore', n: 2, exp: { when: 'end', player: p } });
+        else if (kind === 'location') { const v = O.play.filter(i => !kwOf(s, i, 'ward')).sort((a, b) => instValue(s, b) - instValue(s, a))[0]; if (v) banish(s, v, `est banni (${name})`); }
+        fire(s, 'milled', { player: p, cards: [c] }); break; }
+      case 'inkToHandBest': { if (!P.inkwell.length) { ctx.lastDone = false; break; } const c = [...P.inkwell].sort((a, b) => cardValue(b.card) - cardValue(a.card))[0]; P.inkwell.splice(P.inkwell.indexOf(c), 1); P.hand.push(c); P.inkUsed = Math.min(P.inkUsed, P.inkwell.length); break; }
+      case 'hadesDeal': { const t = ctx.it; if (!t || !isInPlay(s, t)) break; if (instValue(s, t) > 6) draw(s, p, 2); else { if (leavePlay(s, t)) s.players[t.owner].deck.unshift(resetInst(t)); log(s, p, `${t.card.fullName} part sous le deck de son propriétaire.`); } break; }
+      case 'cycle': { const c = chooseCardsToDiscard(P, 1); if (!c.length) { ctx.lastDone = false; break; } P.deck.unshift(...c); draw(s, p, c.length + 1); break; }
+      case 'rapunzelReveal': if (P.hand.some(h => h.card.kind === 'character' && P.play.some(i => i !== src && i.card.nameEn === h.card.nameEn))) draw(s, p, 1); break;
+      case 'stitchRevive': { const c = ctx.banishedCard || src; const k = P.discard.indexOf(c); const fod = [...P.hand].filter(x => x.card.inkable).sort((a, b) => cardValue(a.card) - cardValue(b.card))[0]; if (k < 0 || !fod) { ctx.lastDone = false; break; } P.hand.splice(P.hand.indexOf(fod), 1); P.discard.push(fod); P.discard.splice(P.discard.indexOf(c), 1); P.hand.push(c); putIntoPlay(s, p, c, {}); c.exerted = true; log(s, p, `${c.card.fullName} revient de la défausse.`); break; }
       case 'discardBottom': {
         const ok = P.discard.filter(x => (!e.kind || x.card.kind === e.kind) && (!e.cls || hasCls(x, e.cls)) && (!e.named || x.card.nameEn === e.named)).sort((a, b) => cardValue(a.card) - cardValue(b.card));
         if (e.exact && ok.length < e.n) { ctx.lastDone = false; break; }
-        const go = ok.slice(0, e.n); for (const c of go) P.discard.splice(P.discard.indexOf(c), 1); P.deck.unshift(...go);
+        const go = ok.slice(0, e.n); for (const c of go) P.discard.splice(P.discard.indexOf(c), 1); P.deck.unshift(...go); ctx.movedCards = go;
         ctx.discardedWay = go.length; if (!go.length) ctx.lastDone = false; else fire(s, 'leftDiscard', { player: p }); break;
       }
-      case 'oppDiscardBottom': { const ok = O.discard.filter(x => !e.kind || x.card.kind === e.kind); if (ok.length < e.n) { ctx.lastDone = false; break; } for (const c of ok.slice(0, e.n)) O.discard.splice(O.discard.indexOf(c), 1); O.deck.unshift(...ok.slice(0, e.n)); break; }
+      case 'oppDiscardBottom': { const ok = O.discard.filter(x => !e.kind || x.card.kind === e.kind).sort((a, b) => cardValue(b.card) - cardValue(a.card)); ctx.movedCards = ok.slice(0, e.n); if (ok.length < e.n) { ctx.lastDone = false; break; } for (const c of ok.slice(0, e.n)) O.discard.splice(O.discard.indexOf(c), 1); O.deck.unshift(...ok.slice(0, e.n)); break; }
       case 'handToTop': { const cards = chooseCardsToDiscard(P, e.n); P.deck.push(...cards); break; }
       case 'topToHand': { const c = P.deck.pop(); if (c) P.hand.push(c); break; }
       case 'selfToDeck': { const c = ctx.banishedCard || src; const k = P.discard.indexOf(c); if (isInPlay(s, c)) leavePlay(s, c); else if (k >= 0) P.discard.splice(k, 1); else break; if (e.top) P.deck.push(resetInst(c)); else P.deck.unshift(resetInst(c)); break; }
@@ -787,9 +845,9 @@ function resolve(s, p, effects, ctx, chosen) {
       }
       case 'moveDamageAll': {
         const to = targetsFor(s, p, { ...e, t: e.t2 }, ctx, chosen)[0]; if (!to) { ctx.lastDone = false; break; }
-        let n = 0;
+        let n = 0; ctx.movedDamage = 0;
         for (const i of (e.all ? allInPlay(s) : P.play).filter(i => i !== to && i.card.kind === 'character' && i.damage > 0)) { const k = e.all ? i.damage : 1; i.damage -= k; n += k; }
-        log(s, p, `${n} dégât(s) déplacé(s) vers ${to.card.name}.`); if (n) { to.damage += n; if (to.damage >= wilOf(to, s)) banish(s, to); } break;
+        ctx.movedDamage = n; log(s, p, `${n} dégât(s) déplacé(s) vers ${to.card.name}.`); if (n) { to.damage += n; if (to.damage >= wilOf(to, s)) banish(s, to); } break;
       }
       case 'underToHand': { const host = src && isInPlay(s, src) ? src : null; if (!host || !host.under.length) { ctx.lastDone = false; break; } P.hand.push(...host.under.splice(0)); log(s, p, `${P.name} reprend les cartes placées sous ${host.card.name}.`); break; }
       case 'clearUnder': for (const t of tg) { s.players[t.owner].deck.unshift(...t.under.splice(0)); } break;
@@ -813,6 +871,17 @@ function resolve(s, p, effects, ctx, chosen) {
       case 'taxOrMod': { const t = ctx.ev?.attacker; if (!t || !isInPlay(s, t)) break; if (inkAvailable(O) >= e.pay && O.inkwell.length - O.inkUsed >= e.pay) { O.inkUsed += e.pay; log(s, p, `${O.name} paie ${e.pay} encre.`); } else t.mods.push({ stat: 'str', n: e.n, exp: { when: 'end', player: s.active } }); break; }
       case 'loreUnlessPay': { if (O.inkwell.length - O.inkUsed >= e.pay) { O.inkUsed += e.pay; log(s, p, `${O.name} paie ${e.pay} encre.`); } else gainLore(s, p, e.n); break; }
       case 'nextCharMod': P.nextCharMod = { kw: e.kw, by: p }; break;
+      case 'itToBottom': case 'markOwn': case 'inkDropOpp': case 'rapunzelReveal': case 'jackjack': break;
+      case 'underToInk': v += [...P.play, ...P.locations].reduce((n, h) => n + h.under.length, 0) * 1; break;
+      case 'discardUnder': case 'moveUnderWas': case 'playUnderWas': case 'recurNamed': case 'pickedPlay': case 'weKnow': case 'stitchRevive': case 'playFromUnder': v += 2; break;
+      case 'eachDrawDiscard': v += 1; break;
+      case 'returnMarked': v -= 3; break;
+      case 'scatter': v += O.play.length ? 4 : 0; break;
+      case 'drawDrops': v += 3; break;
+      case 'banishTotal': v += O.play.length ? 5 : 0; break;
+      case 'inkToHandBest': v -= 0.5; break;
+      case 'hadesDeal': v += 3; break;
+      case 'cycle': v += 1.5; break;
       case 'healTotal': { let left = e.n; for (const t of [...P.play].sort((a, b) => b.damage - a.damage)) { const k = Math.min(left, t.damage); t.damage -= k; left -= k; if (k) (ctx.healedList ||= []).push(t); } if (left < e.n) fire(s, 'healed', { inst: ctx.healedList[0], amount: e.n - left }); break; }
       case 'shiftFromDiscard': {
         const opts = P.discard.filter(x => x.card.kind === 'character' && x.card.kw.shift != null && x.card.battleLegal && P.play.some(b => b.card.nameEn === x.card.nameEn)).sort((a, b) => cardValue(b.card) - cardValue(a.card));
@@ -864,7 +933,7 @@ function resolve(s, p, effects, ctx, chosen) {
       case 'playSelfDiscard': {
         const c = ctx.banishedCard || src; const k = P.discard.indexOf(c);
         if (k < 0 || !c.card.battleLegal) { ctx.lastDone = false; break; }
-        const cost = playCost(s, p, c); if (cost > inkAvailable(P)) { ctx.lastDone = false; break; }
+        const cost = e.free ? 0 : playCost(s, p, c); if (cost > inkAvailable(P)) { ctx.lastDone = false; break; }
         const d = Math.min(P.inkDrops || 0, cost); P.inkDrops -= d; P.inkUsed += cost - d;
         P.discard.splice(k, 1); P.hand.push(c); log(s, p, `${P.name} rejoue ${c.card.fullName} depuis sa défausse.`); putIntoPlay(s, p, c, {}); c.exerted = true; break;
       }
@@ -876,7 +945,7 @@ function resolve(s, p, effects, ctx, chosen) {
       }
       case 'inkToHand': { for (let k = 0; k < e.n && P.inkwell.length; k++) { const c = P.inkwell.splice(Math.floor(s.rnd() * P.inkwell.length), 1)[0]; P.hand.push(c); } P.inkUsed = Math.min(P.inkUsed, P.inkwell.length); log(s, p, `${P.name} reprend ${e.n} carte(s) de son encrier.`); break; }
       case 'handToBottom': { const cards = e.all ? P.hand.splice(0) : chooseCardsToDiscard(P, 1); P.deck.unshift(...cards); log(s, p, `${P.name} place ${cards.length} carte(s) sous son deck.`); break; }
-      case 'drawFrom': { const n = e.stat === 'itLore' ? (ctx.it ? loreOf(ctx.it, s) : 0) : e.stat === 'atLoc' ? (src?.at ? loreOf(findInst(s, src.at).inst, s) : 0) : tg[0]?.damage || 0; if (n) { draw(s, p, n); log(s, p, `${P.name} pioche ${n} carte(s).`); } else ctx.lastDone = false; break; }
+      case 'drawFrom': { const n = e.stat === 'targetStr' ? (tg[0] ? strOf(tg[0], s) : 0) : e.stat === 'itLore' ? (ctx.it ? loreOf(ctx.it, s) : 0) : e.stat === 'atLoc' ? (src?.at ? loreOf(findInst(s, src.at).inst, s) : 0) : tg[0]?.damage || 0; if (n) { draw(s, p, n); log(s, p, `${P.name} pioche ${n} carte(s).`); } else ctx.lastDone = false; break; }
       case 'shuffleBack': if (e.who === 'all') { const b0 = O.discard.filter(x => x.card.kind === 'character'); for (const c of b0) O.discard.splice(O.discard.indexOf(c), 1); O.deck.push(...b0); shuffle(O.deck, s.rnd); } {
         const back = P.discard.filter(x => x.card.kind === 'character' && (!e.cls || hasCls(x, e.cls) || x.card.nameEn.includes(e.cls)));
         for (const c of back) P.discard.splice(P.discard.indexOf(c), 1);
@@ -918,11 +987,13 @@ function resolve(s, p, effects, ctx, chosen) {
         }
         break;
       }
-      case 'mill': { const Q = e.who === 'opp' ? O : P; const n = Math.min(e.n, Q.deck.length); const milled = Q.deck.splice(Q.deck.length - n); Q.discard.push(...milled); if (n) fire(s, 'milled', { player: s.players.indexOf(Q), cards: milled }); log(s, p, `${Q.name} défausse ${n} carte(s) du dessus de son deck.`); break; }
+      case 'mill': { const Q = e.who === 'opp' ? O : P; const n = Math.min(e.n, Q.deck.length); const milled = Q.deck.splice(Q.deck.length - n); Q.discard.push(...milled); ctx.milledItems = milled.filter(c => c.card.kind === 'item').length; if (n) fire(s, 'milled', { player: s.players.indexOf(Q), cards: milled }); log(s, p, `${Q.name} défausse ${n} carte(s) du dessus de son deck.`); break; }
       case 'moveFree': {
-        const l = e.there && ctx.ev?.location ? ctx.ev.location : [...P.locations].sort((a, b) => loreOf(b, s) - loreOf(a, s))[0];
+        const cur = e.hereChar ? src : null;
+        const l = e.there && (ctx.ev?.location || ctx.loc) ? (ctx.ev?.location || ctx.loc) : [...P.locations].filter(x => !e.another || (e.hereChar ? x !== src : x.uid !== src?.at)).sort((a, b) => loreOf(b, s) - loreOf(a, s))[0];
         if (!l) { ctx.lastDone = false; break; }
-        const who = (e.it ? (ctx.it && isInPlay(s, ctx.it) ? [ctx.it] : []) : P.play).filter(i => i.at !== l.uid).sort((a, b) => (b === src) - (a === src) || a.exerted - b.exerted || loreOf(b, s) - loreOf(a, s));
+        const pool0 = e.singers ? (src?._singers || []).filter(i => isInPlay(s, i)) : e.hereChar ? P.play.filter(i => i.at === cur?.uid) : e.it ? (ctx.it && isInPlay(s, ctx.it) ? [ctx.it] : []) : P.play;
+        const who = pool0.filter(i => i.at !== l.uid).sort((a, b) => (b === src) - (a === src) || a.exerted - b.exerted || loreOf(b, s) - loreOf(a, s));
         const go = (e.self ? who.filter(i => i === src).concat(who.filter(i => i !== src)) : e.other ? who.filter(i => i !== src) : who).slice(0, e.n);
         ctx.moved = go.length; ctx.otherMoved = go.find(i => i !== src) || null;
         ctx.loc = l;
@@ -952,7 +1023,7 @@ function resolve(s, p, effects, ctx, chosen) {
     }
   }
   // cartes regardées et non prises : sous le deck
-  if (ctx.looked?.length) { for (const c of ctx.looked) { const Q = s.players[c.owner]; if (ctx.lookTop) Q.deck.push(c); else Q.deck.unshift(c); } ctx.looked = null; }
+  if (ctx.looked?.length) { for (const c of ctx.looked) { const Q = s.players[c.owner]; if (ctx.lookDiscard) Q.discard.push(c); else if (ctx.lookTop) Q.deck.push(c); else Q.deck.unshift(c); } ctx.looked = null; }
 }
 
 // ---------------------------------------------------------------- Règles : que peut-on faire ?
@@ -960,7 +1031,9 @@ function resolve(s, p, effects, ctx, chosen) {
 const isMyTurn = (s, p) => !s.over && s.active === p;
 const inkLimit = (s, P) => 1 + P.extraInk + statics(s).filter(({ src, ab }) => ab.st === 'extraInk' && src.owner === s.players.indexOf(P) && staticActive(s, src, ab)).length;
 
+function inkFromDiscardOk(s, p) { return statics(s).some(({ src, ab }) => ab.st === 'inkFromDiscard' && src.owner === p); }
 export function canInk(s, p, uid) {
+  { const P = s.players[p]; const d = P.discard.find(x => x.uid === uid); if (d) return isMyTurn(s, p) && P.inked < inkLimit(s, P) && d.card.inkable && inkFromDiscardOk(s, p); }
   const P = s.players[p]; const i = P.hand.find(x => x.uid === uid);
   return isMyTurn(s, p) && P.inked < inkLimit(s, P) && !!i && (i.card.inkable || statics(s).some(({ src, ab }) => ab.st === 'allInkable' && src.owner === p));
 }
@@ -972,7 +1045,8 @@ export function canQuest(s, p, uid) {
 }
 
 function canAttack(s, p, i) {
-  if (i.card.kw.adventurous) return false;
+  if (i.card.kw.adventurous || (i.mods || []).some(m => m.kw === 'adventurous')) return false;
+  if ((s.locks || []).some(l => (l.player === p || l.player === 'all') && l.types.includes('challenge'))) return false;
   if (statics(s).some(({ ab }) => ab.st === 'oneChallenger') && (s.players[p].turnLog || []).some(x => x.what === 'challenged')) return false;
   if (i.card.abilities.some(ab => ab.st === 'questTax') && inkAvailable(s.players[p]) < 1) return false;
   return isMyTurn(s, p) && i.owner === p && i.card.kind === 'character' && !i.exerted && (!i.fresh || kwOf(s, i, 'rush')) && !restricted(s, i, 'challenge');
@@ -1013,6 +1087,8 @@ function playCost(s, p, inst) {
     cost -= ab.n;
   }
   for (const { ab } of statics(s)) if (ab.st === 'costMore' && ab.kinds.includes(c.kind)) cost += ab.n;
+  if (c.kind === 'action' && !(P.playedList || []).some(x => x.card.kind === 'action'))
+    for (const { src, ab } of statics(s)) if (ab.st === 'firstActionLessHere' && src.owner === p) cost -= P.play.filter(x => x.at === src.uid).length;
   if (c.kind === 'character' && !(P.playedList || []).some(x => x.card.kind === 'character'))
     for (const { src, ab } of statics(s)) if (ab.st === 'firstCharLess' && src.owner === p) cost -= ab.n;
   if (c.abilities.some(ab => ab.st === 'freeIf' && (!ab.yourTurn || s.active === p) && condOk(s, { ...inst, owner: p }, ab.cond))) return 0;
@@ -1021,6 +1097,20 @@ function playCost(s, p, inst) {
   return Math.max(0, cost);
 }
 
+function altFreeOk(s, p, i, ab) {
+  const P = s.players[p];
+  if (ab.exertItems && P.items.filter(x => !x.exerted).length < ab.exertItems) return false;
+  if (ab.discardCls != null && !P.discard.some(x => x.card.kind === 'character' && (!ab.discardCls || hasCls(x, ab.discardCls)))) return false;
+  if (ab.banishItem && !P.items.length) return false;
+  return true;
+}
+function payAlt(s, p, i, opt) {
+  const P = s.players[p], ab = i.card.abilities.find(x => x.st === 'altFree');
+  if (!ab) return;
+  for (let k = 0; k < (ab.exertItems || 0); k++) { const x = P.items.find(y => !y.exerted); if (x) x.exerted = true; }
+  if (ab.discardCls != null) { const c = P.discard.find(x => x.card.kind === 'character' && (!ab.discardCls || hasCls(x, ab.discardCls))); if (c) { P.discard.splice(P.discard.indexOf(c), 1); P.deck.unshift(c); } }
+  if (ab.banishItem) { const x = [...P.items].sort((a, b) => cardValue(a.card) - cardValue(b.card))[0]; if (x) banish(s, x, 'est sacrifié'); }
+}
 /** Toutes les façons de jouer une carte de la main. */
 export function playOptions(s, p, uid) {
   const P = s.players[p]; const i = P.hand.find(x => x.uid === uid);
@@ -1031,11 +1121,15 @@ export function playOptions(s, p, uid) {
   const c = i.card, ink = inkAvailable(P), out = [];
   const cost = playCost(s, p, i);
   if (cost <= ink) out.push({ mode: 'normal', cost });
+  for (const ab of c.abilities) if (ab.st === 'altFree' && cost > 0 && (!ab.yourTurn || s.active === p) && altFreeOk(s, p, i, ab)) out.push({ mode: 'alt', cost: 0, label: ab.exertItems ? `épuiser ${ab.exertItems} objets` : ab.banishItem ? 'bannir un objet' : 'remettre une carte de la défausse sous le deck' });
   if (c.kind === 'character' && c.kw.shift != null)
     for (const base of P.play.filter(b => (b.card.nameEn === c.nameEn || b.card.abilities.some(ab => ab.st === 'shiftName' && (ab.name === c.nameEn || ab.name === '*'))) && b.card.id !== c.id)) {
       const less = statics(s).filter(({ src, ab }) => ab.st === 'shiftLess' && src.owner === p).reduce((n, { ab }) => n + ab.n, 0) + base.card.abilities.filter(ab => ab.st === 'shiftOntoLess').reduce((n, ab) => n + ab.n, 0);
       const zero = c.abilities.some(ab => ab.st === 'shiftZero' && condOk(s, { ...i, owner: p }, ab.cond));
-      const cost = zero ? 0 : Math.max(0, c.kw.shift - less);
+      const per = c.abilities.filter(ab => ab.st === 'shiftPer').reduce((n, ab) => n + count(s, p, ab.per, i), 0);
+      const cost = zero ? 0 : Math.max(0, c.kw.shift - less - per);
+      const alt = c.abilities.find(ab => ab.st === 'altShift');
+      if (alt && P.discard.filter(x => x.card.kind === 'character').length >= alt.n && cost > 0) out.push({ mode: 'altShift', cost: 0, shiftOnto: base.uid, n: alt.n });
       if (cost <= ink) out.push({ mode: 'shift', cost, shiftOnto: base.uid });
     }
   if (c.isSong) {
@@ -1081,6 +1175,7 @@ export function moveOptions(s, p, uid) {
   return P.locations.filter(l => i.at !== l.uid).map(l => {
     let cost = l.card.moveCost;
     for (const { src, ab } of statics(s)) if (ab.st === 'moveLess' && src.owner === p && (!ab.self || src === i)) cost = Math.max(0, cost - ab.n);
+    for (const ab of l.card.abilities) if (ab.st === 'moveLessHere' && P.play.some(x => x.at === l.uid)) cost = Math.max(0, cost - ab.n);
     for (const ab of l.card.abilities) if (ab.kind === 'static' && ab.st === 'freeMove' && (!ab.cls || hasCls(i, ab.cls)) && (!ab.named || i.card.nameEn === ab.named) && (!ab.exerted || i.exerted)) cost = 0;
     return { location: l.uid, cost };
   }).filter(o => o.cost <= inkAvailable(P));
@@ -1155,8 +1250,9 @@ export function applyAction(s, a) {
   switch (a.type) {
     case 'ink': {
       if (!canInk(s, p, a.uid)) return { ok: false, error: 'Impossible de mettre cette carte dans l\'encrier' };
-      const i = P.hand.find(x => x.uid === a.uid);
-      P.hand.splice(P.hand.indexOf(i), 1); P.inkwell.push(i); P.inked++;
+      const zone = P.hand.some(x => x.uid === a.uid) ? P.hand : P.discard;
+      const i = zone.find(x => x.uid === a.uid);
+      zone.splice(zone.indexOf(i), 1); P.inkwell.push(i); P.inked++;
       if (statics(s).some(({ src, ab }) => ab.st === 'oppInkExerted' && src.owner !== p && staticActive(s, src, ab))) P.inkUsed++;
       log(s, p, `${P.name} ajoute une carte à son encrier.`);
       fire(s, 'inked', { player: p });
@@ -1167,6 +1263,7 @@ export function applyAction(s, a) {
       if (!opt) return { ok: false, error: 'Impossible de jouer cette carte' };
       const i = P.hand.find(x => x.uid === a.uid), c = i.card;
       // paiement
+      if (opt.mode === 'altShift') { const back = P.discard.filter(x => x.card.kind === 'character').sort((a, b) => cardValue(a.card) - cardValue(b.card)).slice(0, opt.n); for (const x of back) P.discard.splice(P.discard.indexOf(x), 1); P.deck.unshift(...back); }
       if (opt.mode === 'normal') { const d = P.discounts.findIndex(x => (x.types ? x.types.includes(c.kind) : typeMatch(c, x.type))); if (d >= 0) P.discounts.splice(d, 1); }
       let cost = opt.cost;
       const fromDrops = Math.min(P.inkDrops || 0, cost); P.inkDrops -= fromDrops; cost -= fromDrops;
@@ -1174,11 +1271,15 @@ export function applyAction(s, a) {
       if (opt.mode === 'sing' || opt.mode === 'singTogether') {
         const sg = opt.mode === 'sing' ? [opt.singer] : opt.singers;
         i._singers = sg.map(u => P.play.find(y => y.uid === u));
-        for (const u of sg) { const x = P.play.find(y => y.uid === u); x.exerted = true; fire(s, 'exerts', { inst: x }); fire(s, 'sing', { singer: x, together: opt.mode === 'singTogether' }); }
+        for (const u of sg) { const x = P.play.find(y => y.uid === u); x.exerted = true; fire(s, 'exerts', { inst: x }); }
+        i._singFire = sg.map(u => P.play.find(y => y.uid === u)).filter(Boolean); i._together = opt.mode === 'singTogether';
         log(s, p, `${sg.map(u => findInst(s, u).inst.card.name).join(' et ')} chante${sg.length > 1 ? 'nt' : ''} ${c.fullName}.`);
       } else log(s, p, `${P.name} joue ${c.fullName}${opt.mode === 'shift' ? ` par Alter sur ${findInst(s, opt.shiftOnto).inst.card.fullName}` : ''}.`);
       i._chosen = a.target;
-      putIntoPlay(s, p, i, { shiftOnto: opt.mode === 'shift' ? opt.shiftOnto : null });
+      if (opt.mode === 'alt') payAlt(s, p, i, opt);
+      putIntoPlay(s, p, i, { shiftOnto: opt.mode === 'shift' || opt.mode === 'altShift' ? opt.shiftOnto : null });
+      for (const x of i._singFire || []) fire(s, 'sing', { singer: x, together: i._together, inst: i });
+      i._singFire = null;
       return { ok: true };
     }
     case 'quest': {
@@ -1347,6 +1448,17 @@ function effectValue(s, p, effects, ctx = {}) {
       case 'drawLorePer': v += 4; break;
       case 'taxOrMod': case 'loreUnlessPay': v += 1.5; break;
       case 'nextCharMod': v += 0.5; break;
+      case 'itToBottom': case 'markOwn': case 'inkDropOpp': case 'rapunzelReveal': case 'jackjack': break;
+      case 'underToInk': v += [...P.play, ...P.locations].reduce((n, h) => n + h.under.length, 0) * 1; break;
+      case 'discardUnder': case 'moveUnderWas': case 'playUnderWas': case 'recurNamed': case 'pickedPlay': case 'weKnow': case 'stitchRevive': case 'playFromUnder': v += 2; break;
+      case 'eachDrawDiscard': v += 1; break;
+      case 'returnMarked': v -= 3; break;
+      case 'scatter': v += O.play.length ? 4 : 0; break;
+      case 'drawDrops': v += 3; break;
+      case 'banishTotal': v += O.play.length ? 5 : 0; break;
+      case 'inkToHandBest': v -= 0.5; break;
+      case 'hadesDeal': v += 3; break;
+      case 'cycle': v += 1.5; break;
       case 'healTotal': v += P.play.reduce((n, i) => n + i.damage, 0) ? 2 : 0; break;
       case 'grantAb': v += valid.length ? 1.5 : 0; break;
       case 'grantSinger': v += 0.5; break;

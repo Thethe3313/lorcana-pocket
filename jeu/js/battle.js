@@ -221,6 +221,8 @@ class BattleUI {
     if (mine && zone === 'hand' && myTurn) {
       for (const o of playOptions(G, 0, uid)) {
         if (o.mode === 'normal') btns.push(`<button class="btn gold" data-play='${JSON.stringify(o)}'>Jouer (${o.cost} encre)</button>`);
+        if (o.mode === 'alt') btns.push(`<button class="btn gold" data-play='${JSON.stringify(o)}'>Jouer gratuitement (${esc(o.label)})</button>`);
+        if (o.mode === 'altShift') btns.push(`<button class="btn" data-play='${JSON.stringify(o)}'>Alter gratuit sur ${esc(findInst(G, o.shiftOnto).inst.card.fullName)} (${o.n} cartes de la défausse sous le deck)</button>`);
         if (o.mode === 'shift') btns.push(`<button class="btn" data-play='${JSON.stringify(o)}'>Alter sur ${esc(findInst(G, o.shiftOnto).inst.card.fullName)} (${o.cost})</button>`);
         if (o.mode === 'sing') btns.push(`<button class="btn" data-play='${JSON.stringify(o)}'>🎵 Chanter avec ${esc(findInst(G, o.singer).inst.card.name)}</button>`);
         if (o.mode === 'singTogether') btns.push(`<button class="btn" data-play='${JSON.stringify(o)}'>🎵 Chanter à l'unisson (${esc(o.singers.map(u => findInst(G, u).inst.card.name).join(', '))})</button>`);
