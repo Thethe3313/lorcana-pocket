@@ -82,7 +82,7 @@ const TYPEWORD = String.raw`((?:[A-Z][\w'-]* )*(?:or (?:[A-Z][\w'-]* )+)?(?:char
 function typeExpr(str) {
   const out = [];
   // « a character, item, or location card with cost 6 or less »
-  let lm = str.match(/^(?:a|an) ((?:\w+, )+)(?:or |and\/or )(\w+) cards?((?: with .+)?)$/);
+  let lm = str.match(/^(?:(?:a|an) )?((?:\w+, )+)(?:or |and\/or )(\w+) cards?((?: with .+)?)$/);
   if (lm) { const f = cardFilter(lm[3]); if (!f) return null; return [...lm[1].split(', ').filter(Boolean), lm[2]].map(type => ({ type, f })); }
   lm = str.match(/^(?:a|an) (character|item|action|song|location) or (character|item|action|song|location) card((?: with .+)?)$/);
   if (lm) { const f = cardFilter(lm[3]); if (!f) return null; return [lm[1], lm[2]].map(type => ({ type, f })); }
@@ -222,7 +222,7 @@ const RULES = [
   [`draw cards equal to the damage on ${T}`, m => ({ k: 'drawFrom', t: target(m[1]) })],
   ['opposing damaged characters gain Reckless during their next turn', () => ({ k: 'grant', t: {"sel":"each","side":"opp","types":["character"],"f":{"damaged":true}}, kws: [{ kw: 'reckless', v: true }], dur: 'theirNext' })],
   // choisir sans autre effet : la suite parle de « they / that character / the chosen character »
-  [`(?:for each opposing player, )?(?:you may )?choose ((?:a|an) (?:exerted )?(?:character|location)(?: of yours)?|${TGT})`, m => { const t = target(m[1].replace(/^(?:a|an) (exerted )?(character|location)/, 'chosen $1$2').replace(/^an opposing character$/, 'chosen opposing character')); return t && { k: 'mark', t }; }],
+  [`(?:for each opposing player, )?(?:you may )?choose ((?:a|an) (?:exerted )?(?:character|location)(?: of yours)?|${TGT})`, m => { const t = /of theirs$/.test(m[1]) ? target(m[1]) : target(m[1].replace(/^(?:a|an) (exerted )?(character|location)/, 'chosen $1$2').replace(/^an opposing character$/, 'chosen opposing character')); return t && { k: 'mark', t }; }],
   // effets liés à la carte source (« while this item is in play »)
   [`(?:they|that character) can't (challenge or quest|quest or challenge|quest|challenge) while this (?:item|location|character) is in play`, m => ({ k: 'restrict', t: { sel: 'it' }, what: 'quest or challenge', dur: 'whileSrc' })],
   [`while this (?:item|location|character) is in play, that (?:character|location) (?:gains (${KW_RE})|can't ready at the start of their turn)`, m => (m[1] ? { k: 'grant', t: { sel: 'it' }, kws: [kwObj(m[1])], dur: 'whileSrc' } : { k: 'restrict', t: { sel: 'it' }, what: 'ready', dur: 'whileSrc' })],
@@ -285,6 +285,17 @@ const RULES = [
   ['return a card from your discard to your hand', () => ({ k: 'recur', type: 'any', n: 1 })],
   ['put a card from chosen player\'s discard on the bottom of their deck', () => ({ k: 'noop' })],
   ['ready them', () => ({ k: 'ready', t: { sel: 'it' } })],
+  ['gain lore equal to the discarded character\'s \\{L\\}', () => ({ k: 'loreFrom', stat: 'itCardLore' })],
+  ['play a character with the same name as this character for free', () => ({ k: 'playFree', type: 'character', max: 99, sameNameSelf: true })],
+  ['otherwise, put it into your hand', () => ({ k: 'noop' })],
+  ['(?:then, )?(?:put|place) the rest on the top of your deck(?: in any order)?', () => ({ k: 'noop' })],
+  ['(?:you may )?(?:banish this location to )?play a character from your discard for free', () => ({ k: 'playFree', type: 'character', max: 99, fromDiscard: true })],
+  [`move all damage from ${T} to ${T}`, m => ({ k: 'moveDamage', n: 99, t: target(m[1]), t2: target(m[2]) })],
+  ['deal (them|him|her) (\\d+) damage', m => ({ k: 'damage', n: +m[2], t: { sel: 'it' } })],
+  ['move them to another location for free', () => ({ k: 'moveFree', n: 1, it: true, another: true })],
+  ['you pay (\\d+) \\{I\\} less for the next card you play with that name this turn', m => ({ k: 'discount', n: +m[1], type: 'any', named: 'pair' })],
+  ['ready (?:him|her)', () => ({ k: 'ready', t: { sel: 'self' } })],
+  ['reveal the top card of their deck', () => ({ k: 'revealTop', who: 'itOwner' })],
   ['put the rest (?:in|into) your discard', () => ({ k: 'lookBack', discard: true })],
   ['otherwise, put it (?:in|into) your discard', () => ({ k: 'lookBack', discard: true })],
   ['play it as if it were in your hand', () => ({ k: 'playLooked' })],
@@ -337,6 +348,8 @@ const RULES = [
   ['shuffle chosen card from your discard into your deck\\. reveal the top card of your deck\\. if it has the same name as the chosen card, you may play the revealed card for free', () => ({ k: 'weKnow' })],
   ['if it has the same name as the chosen card, you may play the revealed card for free', () => ({ k: 'weKnow' })],
   ['put the top card of your deck into your discard\\. if its card type is:.+', () => ({ k: 'jackjack' })],
+  ['for the rest of this turn, you may play characters from your discard', () => ({ k: 'playFromDiscardTurn' })],
+  ['if you do, they enter play exerted and you can\'t play characters with the same name as characters you played this way this turn', () => ({ k: 'noop' })],
   ['look at the cards in your inkwell and then you may return one to your hand', () => ({ k: 'inkToHandBest' })],
   ['if you do either, (.+)', m => { const e = parseSentence(m[1]); return e && { ...e, ifDo: true }; }],
   [`draw cards equal to the \\{S\\} of ${T}`, m => ({ k: 'drawFrom', stat: 'targetStr', t: target(m[1]) })],
@@ -376,7 +389,7 @@ const RULES = [
   ['play a character from their discard for free', () => ({ k: 'playFree', type: 'character', max: 99, fromDiscard: true, who: 'itOwner' })],
   ['(?:play or )?shift a ((?:[A-Z][\\w\'-]* )*)character(?: with cost (\\d+) or less)? (?:from your discard )?for free', m => ({ k: 'playFree', type: (m[1] + 'character').trim(), max: m[2] ? +m[2] : 99, either: /discard/.test(m[0]) })],
   // révéler / prendre selon une liste de types
-  ['(?:reveal )?(?:up to (\\d+) )?(.+?) and put (?:it|them) in(?:to)? your hand', m => { const parts = m[2].split(/ and up to \\d+ /); const any = parts.flatMap(p => typeExpr(p.replace(/^(?:any number of |up to \\d+ )/, '')) || [null]); if (any.includes(null) || !any.length) return null; return { k: 'pick', any, n: parts.length > 1 ? parts.length : (m[1] ? +m[1] : /any number/.test(m[2]) ? 99 : 1), each: parts.length > 1 }; }],
+  ['(?:reveal )?(?:up to (\\d+) )?(.+?) and put (?:it|them) in(?:to)? your hand', m => { const parts = m[2].split(/ and up to \d+ /); const any = parts.flatMap(p => typeExpr(p.replace(/^(?:any number of |up to \d+ )/, '')) || [null]); if (any.includes(null) || !any.length) return null; return { k: 'pick', any, n: parts.length > 1 ? parts.length : (m[1] ? +m[1] : /any number/.test(m[2]) ? 99 : 1), each: parts.length > 1 }; }],
   ['(?:reveal )?(?:a|an) (.+?) and play it for free', m => { const any = typeExpr(m[1]); return any && { k: 'pickPlay', any }; }],
   ['if it\'s (.+?), (?:you may |they may )?play (?:it|that \\w+|them) for free(?: and (?:they|it|she|he) enters? play exerted)?', m => { const any = typeExpr(m[1]); return any && { k: 'pickPlay', any, exerted: /exerted/.test(m[0]) }; }],
   ['search your deck for (.+?)(?:,| and) reveal (?:it|that card)(?: to all players)?(?:,? and put it in(?:to)? your hand)?', m => { const any = typeExpr(m[1]); return any && { k: 'tutorDeck', any, type: 'any', top: !/hand/.test(m[0]) }; }],
@@ -583,6 +596,7 @@ export function parseCond(s) {
   if (/^you have a character in play with more \{S\} than each opposing character(?: in play)?$/.test(s)) return { c: 'strongest' };
   if (/^you have a character or location in play with a card under them$/.test(s)) return { c: 'anyUnder' };
   if (/^you have an ink drop$/.test(s)) return { c: 'inkDrop' };
+  if ((m = s.match(/^this character has (\d+) or more damage$/))) return { c: 'selfDamageMin', n: +m[1] };
   if ((m = s.match(/^the moved character is a ((?:[A-Z][\w'-]* )*[A-Z][\w'-]*)(?: character)?$/))) return { c: 'itCls', cls: [m[1].trim()] };
   if ((m = s.match(/^(?:an?|any) ((?:[A-Z][\w'-]* )+)(?:character )?cards? (?:is|was|were) (?:discarded|moved) this way$/))) return { c: 'itCls', cls: [m[1].trim()], moved: /moved/.test(s) };
   if ((m = s.match(/^any ((?:[A-Z][\w'-]* )+)cards were moved this way$/))) return { c: 'movedCls', cls: m[1].trim() };
@@ -723,12 +737,13 @@ function parseSentence(raw) {
   let s = lc(raw.replace('__unless', '').trim().replace(/^[•\-]\s*/, '').replace(/[.!]+$/, '').trim());
   let opt = false, cond = null, ifDo = false, m;
   s = s.replace(/^then,?\s+/, '');
-  if ((m = s.match(/^if you do,\s*(.+)$/))) { ifDo = true; s = m[1]; }
+  if ((m = s.match(/^if you do(?: either)?,\s*(.+)$/))) { ifDo = true; s = m[1]; }
   if ((m = s.match(/^if you do and ([^,]+),\s*(.+)$/))) { ifDo = true; cond = parseCond(m[1]); if (!cond) return null; s = m[2]; }
   if (/^if .+ (?:is|are) chosen, .+ instead$/.test(s) || /^if you (?:removed an ink drop|used shift) .+ instead$/i.test(s)) return { k: 'noop' };
   // « If it's a song card, you may play it for free » : phrase complète, pas une condition
   if (/^if it's /.test(s)) for (const [re, f] of COMPILED) { const mm = s.match(re); if (mm) { const e = f(mm); if (e && (!('t' in e) || e.t)) return { ...e, ...(ifDo ? { ifDo } : {}) }; } }
-  if (!cond && !/^if they don't, /.test(s) && (m = s.match(/^if ([^,]+),\s*(.+)$/))) { cond = parseCond(m[1]); if (!cond) return null; s = m[2]; }
+  // condition en tête ; si elle n'est pas reconnue, la phrase entière peut encore correspondre à une règle
+  if (!cond && !/^if they don't, /.test(s) && (m = s.match(/^if ([^,]+),\s*(.+)$/))) { const c = parseCond(m[1]); if (c) { cond = c; s = m[2]; } }
   if ((m = s.match(/^(?:you may|they may|that player may|their player may)\s+(.+)$/))) { opt = true; s = m[1]; }
   s = lc(s);
   for (const [re, f] of COMPILED) {
@@ -752,7 +767,7 @@ function parseSentence(raw) {
 // Phrase composée : « draw a card and gain 1 lore », « deal 2 damage to X to draw 2 cards »
 const VERB = String.raw`(?:you )?(?:gain|draw|deal|banish|ready|exert|return|put|remove|each opponent|chosen opponent|look|play|move|get|give|pay|have|discard|shuffle|reveal)`;
 const RE_TO = new RegExp(String.raw`^(.+?) to (${VERB}\b.+)$`);
-const RE_AND = new RegExp(String.raw`,? and (?=${VERB}\b)|, (?=${VERB}\b)| and (?=chosen )| and (?=they gain )`);
+const RE_AND = new RegExp(String.raw`(?<!choose),? and (?=${VERB}\b)|, (?=${VERB}\b)| and (?=chosen )| and (?=they gain )`);
 function parseCompound(s) {
   const one = parseSentence(s);
   if (one) return [one];
@@ -902,7 +917,7 @@ function parseStatic(s) {
   // « While … , <effet permanent> » / « If … , <effet permanent> » : condition générique, l'effet est lu à part
   for (let k = s.indexOf(','); /^(?:while|if) /.test(s) && k > 0; k = s.indexOf(',', k + 1)) {
     const c = parseCond(s.slice(0, k).replace(/^(?:while|if) /, '')); const rest = s.slice(k + 1).trim();
-    const inner = c && rest && parseStatic(rest.replace(/ this turn$/, ''));
+    const inner = c && rest && (parseStatic(rest) || parseStatic(rest.replace(/ this turn$/, '')));
     if (inner) return { ...inner, cond: inner.cond && inner.cond.c !== 'here' ? { c: 'all', list: [c, inner.cond] } : c, yourTurn: inner.yourTurn || yourTurn, oppTurn: inner.oppTurn || oppTurn };
   }
   if ((m = s.match(/^(?:while|if) ([^,]+),\s*(.+)$/))) {
@@ -946,6 +961,7 @@ function parseStatic(s) {
   if (/^for each item card in your discard, you pay 1 \{I\} less to play this character using her Shift ability$/.test(s)) return { st: 'shiftPer', per: { n: 'discardType', type: 'item' } };
   if ((m = s.match(/^for each character you have here, you pay 1 \{I\} less for the first action you play each turn$/))) return { st: 'firstActionLessHere' };
   if (/^you can ink cards from your discard$/.test(s)) return { st: 'inkFromDiscard' };
+  if ((m = s.match(/^(opposing characters can't exert to sing songs) and (your .+)$/))) { const a = parseStatic(m[1].replace(/can't exert to sing songs/, "can't {E} to sing songs")) || { st: 'cant', subj: { who: 'opp' }, what: 'sing' }; const b = parseStatic(m[2]); return b ? { st: 'multi', parts: [a, b] } : null; }
   // « … while here » appliqué à certaines classes : « Hunny characters get +1 {L} while here »
   if ((m = s.match(/^((?:[A-Za-z][\w'-]* )*?)(?:[Cc]haracters)(?: with (\w+))? (gets? .+|gains? .+) while here$/)) && !/^your /i.test(s) && (m[1].trim() || m[2])) {
     const inner = parseStatic('characters ' + m[3] + ' while here');
@@ -990,7 +1006,7 @@ function parseStatic(s) {
   if ((m = s.match(/^you pay (\d+) \{I\} less to shift a character on top of this character$/))) return { st: 'shiftOntoLess', n: +m[1] };
   if (/^opponents can't choose your items for abilities or effects$/.test(s)) return { st: 'itemWard' };
   if (/^opponents must choose this character for actions and abilities if able$/.test(s)) return { st: 'taunt' };
-  if (/^if this character would be banished, put them into your inkwell facedown and exerted instead$/.test(s)) return { st: 'banishToInk' };
+  if (/^if this character would be banished, put them into your inkwell facedown and exerted instead\.?$/.test(s)) return { st: 'banishToInk' };
   if ((m = s.match(/^(?:during your turn, )?(?:if (.+?), )?you (?:may|can) play this (?:character|item|card) for free(?: if (.+))?$/))) { const c = m[1] || m[2] ? parseCond(m[1] || m[2]) : { c: 'always' }; return c && { st: 'freeIf', cond: c, yourTurn: /^during your turn/.test(s) }; }
   if ((m = s.match(/^you may play items named (.+) for free$/))) return { st: 'costLess', n: 99, what: `items named ${m[1]}` };
   if ((m = s.match(/^if (.+?), you pay (\d+) \{I\} less to play this (?:item|location)$/))) { const c = parseCond(m[1]); return c && { st: 'costLess', n: +m[2], what: 'this character', cond: c }; }
@@ -1216,21 +1232,38 @@ function parseAbility(s, cardType) {
   if (!s) return null;
   if (cardType === 'Action') {
     s = s.replace(/^sing Together \d+\s*/i, '');
+    // Remember Me : jouer des personnages depuis la défausse, un seul exemplaire de chaque nom
+    if (/^for the rest of this turn, you may play characters from your discard\. if you do, they enter play exerted and you can't play characters with the same name as characters you played this way this turn\.?$/i.test(s)) return { kind: 'action', effects: [{ k: 'playFromDiscardTurn', nameLock: true }] };
     const fx = parseBody(s);
     return fx ? { kind: 'action', effects: fx.length ? fx : [{ k: 'noop' }] } : null;
   }
+  // Jack-Jack : « If its card type is: • character … • action or item … • location … »
+  if (/^at the start of your turn, you may put the top card of your deck into your discard\. if its card type is:/i.test(s)) return { kind: 'triggered', ons: [{ on: 'startTurn' }], effects: [{ k: 'jackjack', opt: true }] };
+  // « While you have 3 or more characters here, you may banish this location to play a character from your discard for free. »
+  if ((m = s.match(/^while ([^,]+), you may banish this location to (play a character from your discard for free)\.?$/))) { const c = parseCond(m[1]); return c && { kind: 'activated', cost: { ink: 0, banish: true }, cond: c, effects: [{ k: 'playFree', type: 'character', max: 99, fromDiscard: true }] }; }
+  // « If you have a character named Maui in play, you may use this item's Shapeshift ability for free. »
+  if ((m = s.match(/^if ([^,]+), you may use this item's (\w+) ability for free\.?$/))) { const c = parseCond(m[1]); return c && { kind: 'static', st: 'freeAbility', label: m[2].toUpperCase(), cond: c }; }
+  // Tod : « Twice during your turn, whenever this character is chosen for an action or an item's ability, you may ready him. »
+  if (/^twice during your turn, whenever this character is chosen for an action or an item's ability, you may ready (?:him|her)\.?$/.test(s)) return { kind: 'triggered', ons: [{ on: 'chosenByCard' }], effects: [{ k: 'ready', t: { sel: 'self' }, opt: true }], yourTurn: true, twice: true };
+  // Baymax : « If you would get an ink drop, you may put the top card of your deck into your inkwell facedown and exerted instead. »
+  if (/^if you would get an ink drop, you may put the top card of your deck into your inkwell facedown and exerted instead\.?$/i.test(s)) return { kind: 'static', st: 'dropToRamp' };
+  // Les cœurs vaillants : « Remember Me » / Roi Cornu : jouer des personnages depuis la défausse
+  if ((m = s.match(/^while ([^,]+), you may play characters from your discard\. if you do, they enter play exerted\.?(?: \(you pay all costs\.\))?$/i))) { const c = parseCond(m[1]); return c && { kind: 'static', st: 'playFromDiscard', cond: c }; }
+  // Sugar Rush Speedway : « Once per turn, you may {E} chosen character here and deal them 1 damage to move them to another location for free. »
+  if (/^once per turn, you may \{E\} chosen character here and deal them (\d+) damage to move them to another location for free\.?$/i.test(s)) { const n = +s.match(/deal them (\d+)/)[1]; return { kind: 'activated', cost: { ink: 0 }, once: true, effects: [{ k: 'speedway', n }] }; }
   // « The first time a Floodborn character moves here each turn, … » : déclencheur une fois par tour
   if ((m = s.match(/^(?:during your turn, )?the first time (a ((?:[A-Z][\w'-]* )+)character moves here each turn|you move a character here), (.+)$/))) {
     const fx = parseBody(m[3]);
     return fx && fx.length ? { kind: 'triggered', ons: [{ on: 'moveHere', cls: m[2]?.trim() || null }], effects: fx, once: true, yourTurn: /^during your turn/.test(s) } : null;
   }
-  if (/^whenever one of your other characters would be dealt damage, put that many damage counters on this character instead$/.test(s)) return { kind: 'static', st: 'redirectDamage' };
+  if (/^whenever one of your other characters would be dealt damage, put that many damage counters on this character instead\.?$/.test(s)) return { kind: 'static', st: 'redirectDamage' };
   // Capacité activée : « {E}, 2 {I}, Banish this item - effet »
-  const COST = String.raw`(?:\{E\} one of your (?:characters|items)|\{E\}|\d+ \{I\}|\{I\}|[Bb]anish (?:one of your (?:other )?characters|chosen character of yours|\d+ of your items)|[Dd]eal \d+ damage to this character|[Cc]hoose and discard a character card|[Bb]anish this (?:item|character)|[Bb]anish one of your (?:other )?items|[Cc]hoose and discard (?:a|an) (?:\w+ )?card|[Dd]iscard a card)`;
+  const COST = String.raw`(?:\{E\} one of your (?:[A-Z][\w'-]* )?(?:characters|items)|[Rr]eveal 2 cards with the same name in your hand|\{E\}|\d+ \{I\}|\{I\}|[Bb]anish (?:one of your (?:other )?characters|chosen character of yours|\d+ of your items)|[Dd]eal \d+ damage to this character|[Cc]hoose and discard a character card|[Bb]anish this (?:item|character)|[Bb]anish one of your (?:other )?items|[Cc]hoose and discard (?:a|an) (?:\w+ )?card|[Dd]iscard a card)`;
   if ((m = s.match(new RegExp(String.raw`^(${COST}(?:,\s*${COST})*)\s*-\s*(.+)$`)))) {
-    const cost = { exert: /\{E\}(?! one of your)/.test(m[1].replace(/\{E\} one of your \w+/g, '')) && /\{E\}(?!\s*one)/.test(m[1]), ink: +(m[1].match(/(\d+) \{I\}/)?.[1] || (/\{I\}/.test(m[1]) ? 1 : 0)), banish: /anish this/.test(m[1]),
+    const cost = { exert: /\{E\}(?!\s*one)/.test(m[1]), ink: +(m[1].match(/(\d+) \{I\}/)?.[1] || (/\{I\}/.test(m[1]) ? 1 : 0)), banish: /anish this/.test(m[1]),
       banishItem: /anish one of your (?:other )?items/.test(m[1]) ? 1 : +(m[1].match(/anish (\d+) of your items/)?.[1] || 0), discard: /iscard/.test(m[1]),
-      exertOther: /\{E\} one of your items/.test(m[1]) ? 'item' : /\{E\} one of your characters/.test(m[1]) ? 'character' : null,
+      exertOther: /\{E\} one of your items/.test(m[1]) ? 'item' : /\{E\} one of your (?:[A-Z][\w'-]* )?characters/.test(m[1]) ? 'character' : null, exertCls: m[1].match(/\{E\} one of your ([A-Z][\w'-]*) characters/)?.[1] || null,
+      discardChar: /[Cc]hoose and discard a character card/.test(m[1]), revealPair: /[Rr]eveal 2 cards with the same name/.test(m[1]),
       banishChar: /anish (?:one of your (?:other )?characters|chosen character of yours)/.test(m[1]), selfDamage: +(m[1].match(/eal (\d+) damage to this character/)?.[1] || 0) };
     const fx = parseBody(m[2]);
     return fx ? { kind: 'activated', cost, effects: fx.length ? fx : [{ k: 'noop' }] } : null;
@@ -1307,10 +1340,19 @@ export function parseCardText(textEn, cardType) {
       for (const k of KW) if (new RegExp(`^${k}\\b`).test(line)) keywords[k.toLowerCase()] = true;
       continue;
     }
+    if ((m = line.match(/^Shift Remove (\d+) ink drops/))) { keywords.shiftDrops = +m[1]; continue; }
     if (/^(?:[A-Z][\w'-]* )*Shift:/.test(line)) continue; // Alter avec un coût autre que de l'encre : ignoré
     const clean = line.replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
     if (!clean) continue; // ligne de rappel seule (ex. chanson)
     if (cardType === 'Action') {
+      // « During your turn, when you discard this card, you may play it from your discard. » à la fin du texte d'une action
+      { const k = clean.search(/During your turn, when you discard this card, you may play it from your discard\.?/);
+        if (k > 0) {
+          abilities.push({ kind: 'triggered', ons: [{ on: 'discardedSelf' }], effects: [{ k: 'playSelfDiscard', free: false }], yourTurn: true, label: null, text: line });
+          const ab = parseAbility(clean.slice(0, k).trim(), 'Action');
+          if (ab) abilities.push({ ...ab, label: null, text: line }); else unhandled.push(line);
+          continue;
+        } }
       const cl = lc(clean.replace(/[.]$/, ''));
       if ((m = cl.match(/^you can't play this action unless (.+)$/)) && parseCond(m[1])) { abilities.push({ kind: 'static', st: 'playUnless', cond: parseCond(m[1]), label: null, text: line }); continue; }
       if (/^during your turn, when you discard this card, you may play it from your discard$/.test(cl)) { abilities.push({ kind: 'triggered', ons: [{ on: 'discardedSelf' }], effects: [{ k: 'playSelfDiscard', free: false }], yourTurn: true, label: null, text: line }); continue; }
@@ -1325,7 +1367,8 @@ export function parseCardText(textEn, cardType) {
     // nom de la capacité en majuscules
     const toks = clean.split(' ');
     let i = 0;
-    while (i < toks.length - 1 && (/[A-Z]/.test(toks[i]) || toks[i] === '&') && toks[i] === toks[i].toUpperCase() && !/^\{|^\d/.test(toks[i])) i++;
+    if (/^[\d,]{4,}$/.test(toks[0]) && /^[A-Z]{2,}/.test(toks[1] || '')) i = 1;
+  while (i < toks.length - 1 && (/[A-Z]/.test(toks[i]) || toks[i] === '&') && toks[i] === toks[i].toUpperCase() && !/^\{|^\d/.test(toks[i])) i++;
     const label = toks.slice(0, i).join(' ').replace(/,$/, '');
     const ab = parseAbility(toks.slice(i).join(' '), cardType);
     if (ab) abilities.push({ ...ab, label: label || null, text: line }); else unhandled.push(line);

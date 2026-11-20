@@ -92,7 +92,10 @@ function abilitiesOf(s, inst) {
 
 function statics(s) {
   const out = [];
-  for (const src of allInPlay(s)) for (const ab of src.card.abilities) if (ab.kind === 'static') out.push({ src, ab });
+  for (const src of allInPlay(s)) for (const ab of src.card.abilities) if (ab.kind === 'static') {
+    if (ab.st === 'multi') for (const part of ab.parts) out.push({ src, ab: { ...part, kind: 'static', cond: ab.cond, yourTurn: ab.yourTurn, oppTurn: ab.oppTurn } });
+    else out.push({ src, ab });
+  }
   return out;
 }
 
@@ -168,6 +171,7 @@ function condOk(s, src, c, ctx = {}) {
     case 'singers': return (src._singers || []).length >= c.n;
     case 'oppDeclined': return !!ctx.oppDeclined;
     case 'not': return !condOk(s, src, c.of, ctx);
+    case 'selfDamageMin': return (src.damage || 0) >= c.n;
     case 'itType': return !!ctx.it && typeMatch(ctx.it.card, c.type);
     case 'movedCls': return (ctx.movedCards || []).some(x => hasCls(x, c.cls) || x.card.cls.includes(c.cls));
     case 'hadExertedHere': return !!(ctx.banishedCard || src)._exHere;
@@ -347,7 +351,7 @@ function startTurn(s, first = false) {
   const p = s.active, P = s.players[p];
   expire(s, 'start', p);
   s.locks = (s.locks || []).filter(l => l.by !== p);
-  P.inkUsed = 0; P.inked = 0; P.inkDrops = 0; P.discounts = []; P.played = {}; P.playedList = []; P.extraInk = 0; P.healedTurn = false; P.turnLog = []; P.discardStart = P.discard.length; s.turnTriggers = []; P.gotDropTurn = false; s.leftDiscardTurn = false; for (const Q of s.players) { Q.drawnTurn = 0; Q.inkedTurn = 0; } for (const Q of s.players) Q.banishedTurnList = []; for (const Q of s.players) Q.turnHits = []; s.banishedTurn = 0;
+  P.inkUsed = 0; P.inked = 0; P.inkDrops = 0; P.discounts = []; P.played = {}; P.playedList = []; P.extraInk = 0; P.healedTurn = false; P.playFromDiscard = false; P.discardNameLock = false; P.discardNames = []; P.turnLog = []; P.discardStart = P.discard.length; s.turnTriggers = []; P.gotDropTurn = false; s.leftDiscardTurn = false; for (const Q of s.players) { Q.drawnTurn = 0; Q.inkedTurn = 0; } for (const Q of s.players) Q.banishedTurnList = []; for (const Q of s.players) Q.turnHits = []; s.banishedTurn = 0;
   // Redressement
   let readyLeft = P.readyLimit ?? 99; P.readyLimit = null;
   for (const i of [...P.play, ...P.items]) {
@@ -462,6 +466,7 @@ function fireInner(s, on, ev) {
       if (ab.oppTurn && s.active === src.owner) continue;
       if (ab.abCond && !condOk(s, src, ab.abCond)) continue;
       if (ab.once && src.once[ab.text]) continue;
+      if (ab.twice && (src.once[ab.text + '#'] || 0) >= 2) continue;
       for (const t of ab.ons) if ((t.on === on || (on === 'banished' && BANISH_ONS.includes(t.on))) && triggerMatches(s, t, src, ev)) { jobs.push({ src, ab, ctx: { ...extra } }); break; }
     }
   };
@@ -473,6 +478,7 @@ function fireInner(s, on, ev) {
   for (const { src, ab, ctx } of jobs) {
     if (s.over) return;
     if (ab.once) src.once[ab.text] = true;
+    if (ab.twice) src.once[ab.text + '#'] = (src.once[ab.text + '#'] || 0) + 1;
     resolve(s, src.owner, ab.effects, { src, ev, ...ctx, it: ctx.it || ev.it || (ev.inst && ev.inst !== src ? ev.inst : undefined), label: ab.label });
   }
 }
@@ -529,7 +535,7 @@ function triggerMatches(s, t, src, ev) {
     case 'milled': case 'dropUsed': case 'leftDiscard': return ev.player === src.owner;
     case 'recurred': return ev.player === src.owner && ev.card.card.kind === 'character' && (!t.cls || hasCls(ev.card, t.cls));
     case 'boosted': return mine(ev.inst);
-    case 'chosenByOpp': return ev.inst === src;
+    case 'chosenByOpp': case 'chosenByCard': return ev.inst === src;
     case 'actionDamage': return mine(ev.inst);
     case 'supportChosen': return mine(ev.inst);
     case 'exerts': return t.side === 'opp' ? ev.inst.owner !== src.owner && ev.inst.card.kind === 'character' : ev.inst === src;
@@ -645,7 +651,7 @@ function resolve(s, p, effects, ctx, chosen) {
       if (effectValue(s, p, [e, ...after], ctx) <= 0) { ctx.lastDone = false; continue; }
     }
     const tg = e.t ? targetsFor(s, p, e, ctx, chosen) : [];
-    if (e.t?.sel === 'chosen') for (const t of tg) if (t.owner !== p) fire(s, 'chosenByOpp', { inst: t });
+    if (e.t?.sel === 'chosen') for (const t of tg) { if (t.owner !== p) fire(s, 'chosenByOpp', { inst: t }); if (src && (src.card?.kind === 'action' || src.card?.kind === 'item')) fire(s, 'chosenByCard', { inst: t }); }
     if (e.t && !tg.length && e.k !== 'moveDamage') { ctx.lastDone = false; continue; }
     if (tg.length === 1) { ctx.it = tg[0]; ctx.them = null; } else if (tg.length > 1) ctx.them = tg;
     if (e.alt && condOk(s, src || { owner: p, damage: 0, mods: [] }, e.alt.cond, ctx)) e = { ...e.alt.e, t: e.t, opt: e.opt };
@@ -716,7 +722,8 @@ function resolve(s, p, effects, ctx, chosen) {
       case 'loreOwner': gainLore(s, ctx.it ? ctx.it.owner : p, e.n); break;
       case 'oppLore': if (statics(s).some(x => x.ab.st === 'noLoreLoss' && x.src.owner !== p && s.active === p)) break;
         ctx.lost = Math.min(e.n, O.lore); O.lore = Math.max(0, O.lore - e.n); log(s, p, `${O.name} perd ${e.n} lore.`); break;
-      case 'inkDrop': P.gotDropTurn = true; if (e.who === 'all') { O.inkDrops = (O.inkDrops || 0) + e.n; if (e.lore) { gainLore(s, p, e.lore); gainLore(s, other(p), e.lore); } }
+      case 'inkDrop': if (statics(s).some(({ src: x, ab }) => ab.st === 'dropToRamp' && x.owner === p) && P.deck.length) { for (let k = 0; k < e.n && P.deck.length; k++) { P.inkwell.push(P.deck.pop()); if (s.active === p) P.inkUsed++; } log(s, p, `${P.name} met la carte du dessus de son deck dans son encrier.`); break; }
+        P.gotDropTurn = true; if (e.who === 'all') { O.inkDrops = (O.inkDrops || 0) + e.n; if (e.lore) { gainLore(s, p, e.lore); gainLore(s, other(p), e.lore); } }
         P.inkDrops = (P.inkDrops || 0) + e.n; log(s, p, `${P.name} gagne ${e.n} encre pour ce tour.`); break;
       case 'ramp': for (const q of e.who === 'all' ? [0, 1] : e.who === 'opp' ? [other(p)] : e.who === 'itOwner' ? [ctx.it ? ctx.it.owner : other(p)] : [p]) {
         const Q = s.players[q];
@@ -770,14 +777,23 @@ function resolve(s, p, effects, ctx, chosen) {
           if (e.who === 'itOwner') break; }
         const zone = e.either ? [...P.hand, ...P.discard] : e.fromDiscard ? P.discard : e.fromInk ? P.inkwell : P.hand;
         const max = e.max === 'itCost' ? (ctx.it?.card.cost ?? -1) : e.max === 'itCostPlus' ? (ctx.it ? ctx.it.card.cost + e.plus : -1) : e.max;
-        const c = zone.filter(x => typeMatch(x.card, e.type) && x.card.cost <= max && (!e.sameNameIt || x.card.nameEn === ctx.it?.card.nameEn) && x.card.battleLegal && filterOk(x, e.f)).sort((a, b) => b.card.cost - a.card.cost || cardValue(b.card) - cardValue(a.card))[0];
+        const c = zone.filter(x => typeMatch(x.card, e.type) && x.card.cost <= max && (!e.sameNameIt || x.card.nameEn === ctx.it?.card.nameEn) && (!e.sameNameSelf || x.card.nameEn === src?.card.nameEn) && x.card.battleLegal && filterOk(x, e.f)).sort((a, b) => b.card.cost - a.card.cost || cardValue(b.card) - cardValue(a.card))[0];
         if (c && c.card.kind === 'location') ctx.loc = c;
         if (c) { if (P.discard.includes(c)) { P.discard.splice(P.discard.indexOf(c), 1); P.hand.push(c); fire(s, 'leftDiscard', { player: p }); } if (P.inkwell.includes(c)) { P.inkwell.splice(P.inkwell.indexOf(c), 1); P.inkUsed = Math.min(P.inkUsed, P.inkwell.length); P.hand.push(c); } log(s, p, `${P.name} joue ${c.card.fullName} gratuitement${e.fromDiscard ? ' depuis sa défausse' : ''}.`); putIntoPlay(s, p, c, {}); if (e.exerted && isInPlay(s, c)) c.exerted = true; } else ctx.lastDone = false;
         break;
       }
-      case 'discount': P.discounts.push({ n: e.n === 'num' ? (ctx.num || 0) : amount(s, p, e.n, src, ctx), type: e.type, types: e.types, named: e.named }); break;
+      case 'discount': P.discounts.push({ n: e.n === 'num' ? (ctx.num || 0) : amount(s, p, e.n, src, ctx), type: e.type, types: e.types, named: e.named === 'pair' ? P.pairName : e.named }); break;
       case 'lookBack': if (e.discard) ctx.lookDiscard = true; else ctx.lookTop = e.top; break;
       case 'mark': break;
+      case 'playFromDiscardTurn': P.playFromDiscard = true; if (e.nameLock) P.discardNameLock = true; break;
+      case 'speedway': { // Sugar Rush Speedway : épuiser un perso ici, 1 dégât, déplacement gratuit
+        const who = P.play.filter(i => i.at === src?.uid && !i.exerted).sort((a, b) => (wilOf(b, s) - (b.damage || 0)) - (wilOf(a, s) - (a.damage || 0)))[0];
+        const l = [...P.locations].filter(x => x !== src).sort((a, b) => loreOf(b, s) - loreOf(a, s))[0];
+        if (!who || !l) { ctx.lastDone = false; break; }
+        who.exerted = true; fire(s, 'exerts', { inst: who }); dealDamage(s, who, e.n);
+        if (isInPlay(s, who)) { who.at = l.uid; log(s, p, `${who.card.fullName} se rend à ${l.card.fullName}.`); fire(s, 'move', { inst: who, location: l }); fire(s, 'moveHere', { inst: who, location: l }); }
+        break;
+      }
       case 'itToBottom': { const c = ctx.it; if (!c) break; const Q = s.players[c.owner]; const k = Q.discard.indexOf(c); if (k >= 0) { Q.discard.splice(k, 1); Q.deck.unshift(c); } break; }
       case 'underToInk': { let n = 0; for (const h of [...P.play, ...P.locations]) { n += h.under.length; P.inkwell.push(...h.under.splice(0)); } if (n) { if (s.active === p) P.inkUsed += n; fire(s, 'inked', { player: p }); } break; }
       case 'discardUnder': { const c = P.discard.filter(x => x.card.kind === 'character').sort((a, b) => cardValue(b.card) - cardValue(a.card))[0]; if (!c || !src || !isInPlay(s, src)) { ctx.lastDone = false; break; } P.discard.splice(P.discard.indexOf(c), 1); src.under.push(c); fire(s, 'leftDiscard', { player: p }); break; }
@@ -808,6 +824,7 @@ function resolve(s, p, effects, ctx, chosen) {
         P.discard.splice(P.discard.indexOf(ref), 1); P.deck.push(ref); shuffle(P.deck, s.rnd);
         const top = P.deck[P.deck.length - 1];
         if (top && top.card.nameEn === ref.card.nameEn && top.card.battleLegal) { P.deck.pop(); P.hand.push(top); log(s, p, `${P.name} révèle ${top.card.name} et le joue gratuitement.`); putIntoPlay(s, p, top, {}); }
+        else if (top) { P.deck.pop(); P.hand.push(top); }
         break;
       }
       case 'jackjack': { const c = P.deck.pop(); if (!c) break; P.discard.push(c); const kind = c.card.kind; const t = src && isInPlay(s, src) ? src : null;
@@ -871,7 +888,7 @@ function resolve(s, p, effects, ctx, chosen) {
       case 'taxOrMod': { const t = ctx.ev?.attacker; if (!t || !isInPlay(s, t)) break; if (inkAvailable(O) >= e.pay && O.inkwell.length - O.inkUsed >= e.pay) { O.inkUsed += e.pay; log(s, p, `${O.name} paie ${e.pay} encre.`); } else t.mods.push({ stat: 'str', n: e.n, exp: { when: 'end', player: s.active } }); break; }
       case 'loreUnlessPay': { if (O.inkwell.length - O.inkUsed >= e.pay) { O.inkUsed += e.pay; log(s, p, `${O.name} paie ${e.pay} encre.`); } else gainLore(s, p, e.n); break; }
       case 'nextCharMod': P.nextCharMod = { kw: e.kw, by: p }; break;
-      case 'itToBottom': case 'markOwn': case 'inkDropOpp': case 'rapunzelReveal': case 'jackjack': break;
+      case 'itToBottom': case 'markOwn': case 'inkDropOpp': case 'rapunzelReveal': case 'jackjack': case 'speedway': break;
       case 'underToInk': v += [...P.play, ...P.locations].reduce((n, h) => n + h.under.length, 0) * 1; break;
       case 'discardUnder': case 'moveUnderWas': case 'playUnderWas': case 'recurNamed': case 'pickedPlay': case 'weKnow': case 'stitchRevive': case 'playFromUnder': v += 2; break;
       case 'eachDrawDiscard': v += 1; break;
@@ -967,8 +984,8 @@ function resolve(s, p, effects, ctx, chosen) {
       }
       case 'exertInk': P.inkUsed = P.inkwell.length; if (e.all) O.inkUsed = O.inkwell.length; log(s, p, `${P.name} épuise son encrier.`); break;
       case 'discardHand': { const Q = e.who === 'opp' ? O : P; Q.discard.push(...Q.hand.splice(0)); log(s, p, `${Q.name} défausse sa main.`); break; }
-      case 'loreFrom': { const t = e.stat === 'location' ? ctx.ev?.location : e.stat === 'selfStr' || e.stat === 'itemCost' || e.stat === 'discardLore' ? src : tg[0]; if (!t) { ctx.lastDone = false; break; }
-        let n = e.stat === 'discardLore' ? Math.max(0, ...P.discard.filter(x => x.card.kind === 'character').map(x => x.card.lore)) : e.stat === 'damage' ? t.damage : e.stat === 'selfStr' ? strOf(src, s) : e.stat === 'itemCost' ? Math.max(0, ...P.items.map(i => i.card.cost)) : loreOf(t, s); if (e.max) n = Math.min(n, e.max); log(s, p, `${P.name} gagne ${n} lore (${name}).`); gainLore(s, p, n); break; }
+      case 'loreFrom': { const t = e.stat === 'location' ? ctx.ev?.location : e.stat === 'selfStr' || e.stat === 'itemCost' || e.stat === 'discardLore' || e.stat === 'itCardLore' ? src : tg[0]; if (!t) { ctx.lastDone = false; break; }
+        let n = e.stat === 'itCardLore' ? (ctx.it?.card.lore || 0) : e.stat === 'discardLore' ? Math.max(0, ...P.discard.filter(x => x.card.kind === 'character').map(x => x.card.lore)) : e.stat === 'damage' ? t.damage : e.stat === 'selfStr' ? strOf(src, s) : e.stat === 'itemCost' ? Math.max(0, ...P.items.map(i => i.card.cost)) : loreOf(t, s); if (e.max) n = Math.min(n, e.max); log(s, p, `${P.name} gagne ${n} lore (${name}).`); gainLore(s, p, n); break; }
       case 'tuckSelf': {
         const c = ctx.banishedCard || src;
         if (isInPlay(s, c)) { leavePlay(s, c); P.deck.push(resetInst(c)); } else { const k = P.discard.indexOf(c); if (k < 0) { ctx.lastDone = false; break; } P.discard.splice(k, 1); P.deck.push(c); }
@@ -1112,9 +1129,12 @@ function payAlt(s, p, i, opt) {
   if (ab.banishItem) { const x = [...P.items].sort((a, b) => cardValue(a.card) - cardValue(b.card))[0]; if (x) banish(s, x, 'est sacrifié'); }
 }
 /** Toutes les façons de jouer une carte de la main. */
+const canPlayFromDiscard = (s, p) => s.players[p].playFromDiscard || statics(s).some(({ src, ab }) => ab.st === 'playFromDiscard' && src.owner === p && staticActive(s, src, ab));
 export function playOptions(s, p, uid) {
-  const P = s.players[p]; const i = P.hand.find(x => x.uid === uid);
+  const P = s.players[p]; let i = P.hand.find(x => x.uid === uid);
+  if (!i && canPlayFromDiscard(s, p)) { i = P.discard.find(x => x.uid === uid && x.card.kind === 'character'); if (i) i._fromDiscard = true; }
   if (!i || !isMyTurn(s, p) || !i.card.battleLegal) return [];
+  if (P.discardNameLock && (P.discardNames || []).includes(i.card.nameEn)) return [];
   if (i.card.abilities.some(ab => ab.kind === 'static' && ab.st === 'playUnless' && !condOk(s, { ...i, owner: p }, ab.cond))) return [];
   if ((s.locks || []).some(l => l.player === p && l.types.includes(i.card.kind))) return [];
   if (statics(s).some(({ src, ab }) => ab.st === 'lockOpp' && src.owner !== p && ab.types.includes(i.card.kind) && i.card.cost >= ab.minCost && staticActive(s, src, ab))) return [];
@@ -1122,6 +1142,8 @@ export function playOptions(s, p, uid) {
   const cost = playCost(s, p, i);
   if (cost <= ink) out.push({ mode: 'normal', cost });
   for (const ab of c.abilities) if (ab.st === 'altFree' && cost > 0 && (!ab.yourTurn || s.active === p) && altFreeOk(s, p, i, ab)) out.push({ mode: 'alt', cost: 0, label: ab.exertItems ? `épuiser ${ab.exertItems} objets` : ab.banishItem ? 'bannir un objet' : 'remettre une carte de la défausse sous le deck' });
+  if (c.kind === 'character' && c.kw.shiftDrops && (P.inkDrops || 0) >= c.kw.shiftDrops)
+    for (const base of P.play.filter(b => b.card.nameEn === c.nameEn && b.card.id !== c.id)) out.push({ mode: 'shift', cost: 0, shiftOnto: base.uid, drops: c.kw.shiftDrops });
   if (c.kind === 'character' && c.kw.shift != null)
     for (const base of P.play.filter(b => (b.card.nameEn === c.nameEn || b.card.abilities.some(ab => ab.st === 'shiftName' && (ab.name === c.nameEn || ab.name === '*'))) && b.card.id !== c.id)) {
       const less = statics(s).filter(({ src, ab }) => ab.st === 'shiftLess' && src.owner === p).reduce((n, { ab }) => n + ab.n, 0) + base.card.abilities.filter(ab => ab.st === 'shiftOntoLess').reduce((n, ab) => n + ab.n, 0);
@@ -1149,6 +1171,8 @@ export function playOptions(s, p, uid) {
   return out;
 }
 
+const pairName = P => { const f = {}; for (const c of P.hand) f[c.card.nameEn] = (f[c.card.nameEn] || 0) + 1; return Object.entries(f).find(([, n]) => n >= 2)?.[0] || null; };
+const freeAb = (s, i, ab) => !!ab.label && i.card.abilities.some(x => x.st === 'freeAbility' && ab.label.toUpperCase().startsWith(x.label) && condOk(s, i, x.cond));
 /** Capacités activables (⟳) d'un objet ou d'un personnage en jeu. */
 export function activateOptions(s, p, uid) {
   const P = s.players[p]; const i = inPlay(P).find(x => x.uid === uid);
@@ -1158,12 +1182,16 @@ export function activateOptions(s, p, uid) {
     if (ab.once && i.once[ab.text]) return false;
     const c = ab.cost;
     if (c.exert && (i.exerted || (i.card.kind === 'character' && i.fresh))) return false;
-    if (c.ink > inkAvailable(P)) return false;
+    if (freeAb(s, i, ab) ? false : (c.ink || 0) > inkAvailable(P)) return false;
     if (c.banishItem && P.items.filter(x => x !== i).length === 0) return false;
     if (c.discard && !P.hand.length) return false;
     if (c.banishItem > 1 && P.items.filter(x => x !== i).length < c.banishItem) return false;
     if (c.exertOther && !(c.exertOther === 'item' ? P.items : P.play).some(x => x !== i && !x.exerted && !(x.card.kind === 'character' && x.fresh))) return false;
     if (c.banishChar && !P.play.some(x => x !== i)) return false;
+    if (c.discardChar && !P.hand.some(x => x.card.kind === 'character')) return false;
+    if (c.revealPair && !pairName(P)) return false;
+    if (c.exertCls && !P.play.some(x => x !== i && !x.exerted && !x.fresh && hasCls(x, c.exertCls))) return false;
+    if (ab.cond && !condOk(s, i, ab.cond)) return false;
     return true;
   }).map(({ ab, index }) => ({ index, cost: ab.cost, label: ab.label, text: ab.text }));
 }
@@ -1229,6 +1257,7 @@ function putIntoPlay(s, p, inst, { shiftOnto = null } = {}) {
     }
     for (const ab of c.abilities) if (ab.kind === 'static' && ab.st === 'entersDamaged') inst.damage = ab.n;
   }
+  if (inst._enterExerted) { inst.exerted = true; inst._enterExerted = false; }
   if (c.kind === 'character' && P.nextCharMod) { inst.exerted = true; inst.mods.push({ kw: P.nextCharMod.kw, v: true, exp: { when: 'start', player: P.nextCharMod.by } }); P.nextCharMod = null; }
   if (inst.shifted) for (const ab of c.abilities) if (ab.shiftDraw) draw(s, p, ab.shiftDraw);
   const chosen = inst._chosen; inst._chosen = undefined;
@@ -1261,11 +1290,14 @@ export function applyAction(s, a) {
     case 'play': {
       const opt = playOptions(s, p, a.uid).find(o => o.mode === (a.mode || 'normal') && (o.shiftOnto == null || o.shiftOnto === a.shiftOnto) && (o.singer == null || o.singer === a.singer));
       if (!opt) return { ok: false, error: 'Impossible de jouer cette carte' };
-      const i = P.hand.find(x => x.uid === a.uid), c = i.card;
+      let i = P.hand.find(x => x.uid === a.uid);
+      if (!i) { i = P.discard.find(x => x.uid === a.uid); P.discard.splice(P.discard.indexOf(i), 1); P.hand.push(i); i._enterExerted = true; (P.discardNames ||= []).push(i.card.nameEn); }
+      const c = i.card;
       // paiement
       if (opt.mode === 'altShift') { const back = P.discard.filter(x => x.card.kind === 'character').sort((a, b) => cardValue(a.card) - cardValue(b.card)).slice(0, opt.n); for (const x of back) P.discard.splice(P.discard.indexOf(x), 1); P.deck.unshift(...back); }
       if (opt.mode === 'normal') { const d = P.discounts.findIndex(x => (x.types ? x.types.includes(c.kind) : typeMatch(c, x.type))); if (d >= 0) P.discounts.splice(d, 1); }
       let cost = opt.cost;
+      if (opt.drops) { P.inkDrops -= opt.drops; fire(s, 'dropUsed', { player: p }); }
       const fromDrops = Math.min(P.inkDrops || 0, cost); P.inkDrops -= fromDrops; cost -= fromDrops;
       P.inkUsed += cost; i.usedDrop = fromDrops > 0; i._paid = opt.cost; if (fromDrops) fire(s, 'dropUsed', { player: p });
       if (opt.mode === 'sing' || opt.mode === 'singTogether') {
@@ -1336,15 +1368,18 @@ export function applyAction(s, a) {
       const i = inPlay(P).find(x => x.uid === a.uid), ab = abilitiesOf(s, i)[a.index], c = ab.cost;
       if (ab.once) i.once[ab.text] = true;
       if (c.exert) { i.exerted = true; fire(s, 'exerts', { inst: i }); }
-      let ink = c.ink || 0; const fromDrops = Math.min(P.inkDrops || 0, ink); P.inkDrops -= fromDrops; P.inkUsed += ink - fromDrops;
+      let ink = freeAb(s, i, ab) ? 0 : (c.ink || 0); const fromDrops = Math.min(P.inkDrops || 0, ink); P.inkDrops -= fromDrops; P.inkUsed += ink - fromDrops;
       if (c.discard) P.discard.push(...chooseCardsToDiscard(P, 1));
       for (let k = 0; k < (c.banishItem || 0); k++) { const it = P.items.filter(x => x !== i).sort((a2, b2) => cardValue(a2.card) - cardValue(b2.card))[0]; if (it) banish(s, it, 'est sacrifié'); }
-      if (c.exertOther) { const x = (c.exertOther === 'item' ? P.items : P.play).filter(y => y !== i && !y.exerted && !(y.card.kind === 'character' && y.fresh)).sort((a2, b2) => cardValue(a2.card) - cardValue(b2.card))[0]; if (x) { x.exerted = true; fire(s, 'exerts', { inst: x }); } }
-      if (c.banishChar) { const x = P.play.filter(y => y !== i).sort((a2, b2) => instValue(s, a2) - instValue(s, b2))[0]; if (x) banish(s, x, 'est sacrifié'); }
+      let paidCard = null;
+      if (c.discardChar) { const d = P.hand.filter(x => x.card.kind === 'character').sort((a2, b2) => cardValue(b2.card) * (b2.card.lore) - cardValue(a2.card) * (a2.card.lore))[0]; if (d) { P.hand.splice(P.hand.indexOf(d), 1); P.discard.push(d); paidCard = d; fire(s, 'discarded', { player: p, cards: [d] }); } }
+      if (c.revealPair) P.pairName = pairName(P);
+      if (c.exertOther) { const x = (c.exertOther === 'item' ? P.items : P.play).filter(y => y !== i && !y.exerted && !(y.card.kind === 'character' && y.fresh) && (!c.exertCls || hasCls(y, c.exertCls))).sort((a2, b2) => cardValue(a2.card) - cardValue(b2.card))[0]; if (x) { x.exerted = true; fire(s, 'exerts', { inst: x }); } }
+      if (c.banishChar) { const x = P.play.filter(y => y !== i).sort((a2, b2) => instValue(s, a2) - instValue(s, b2))[0]; if (x) { banish(s, x, 'est sacrifié'); paidCard = x; } }
       if (c.selfDamage) dealDamage(s, i, c.selfDamage);
       log(s, p, `${i.card.fullName} utilise « ${ab.label || 'capacité'} ».`);
       if (c.banish) banish(s, i, 'est banni pour son effet');
-      resolve(s, p, ab.effects, { src: i, label: ab.label }, a.target);
+      resolve(s, p, ab.effects, { src: i, label: ab.label, it: paidCard || undefined }, a.target);
       return { ok: true };
     }
     case 'move': {
