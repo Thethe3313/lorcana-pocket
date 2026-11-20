@@ -14,7 +14,7 @@ const STAT = { S: 'str', W: 'wil', L: 'lore' };
 // ------------------------------------------------------------------ Cibles
 const CLS = String.raw`(?:[A-Z][\w'-]*(?: [A-Z][\w'-]*)*(?:,? (?:and |or )?[A-Z][\w'-]*(?: [A-Z][\w'-]*)*)* )`;
 const FILT = String.raw`(?: with (?:cost \d+ or (?:less|more)|\d+ \{[SWL]\} or (?:less|more)|a cost of \d+ or (?:less|more)|Evasive|Bodyguard|Reckless|damage|no damage))?(?: named [A-Z][^.,]*?)?(?: here| at a location)?(?: each)?`;
-const NOUN = String.raw`(?:characters?, items?,? (?:or|and/or) locations?|characters? (?:or|and/or) locations?|characters? or items?|items? or locations?|locations? or items?|characters?|items?|locations?)`;
+const NOUN = String.raw`(?:locations? or characters?|characters?, items?,? (?:or|and/or) locations?|characters? (?:or|and/or) locations?|characters? or items?|items? or locations?|locations? or items?|characters?|items?|locations?)`;
 const TGT = String.raw`(?:this (?:character|item|location)|them|they|he|she|it|him|her|that character|the chosen character|the challenging character|the challenged character|(?:up to \d+ |any number of )?(?:another |other )?chosen (?:opposing )?(?:damaged |exerted |ready )?(?:opposing )?${CLS}?${NOUN}(?: of yours)?${FILT}|(?:each|all) (?:other )?(?:opposing )?(?:damaged |exerted |ready )?${CLS}?characters?${FILT}|(?:all |each of )?your (?:other )?(?:exerted |damaged |ready )?${CLS}?characters${FILT}|one of your (?:other )?(?:${CLS})?(?:characters|items|locations)|an opposing (?:damaged )?character|another (?:chosen )?character)`;
 const splitCls = s => s.split(/,? (?:and |or )|, /).map(x => x.trim()).filter(Boolean);
 
@@ -153,6 +153,17 @@ const RULES = [
   ['put all cards from your hand into your inkwell facedown and exerted', () => ({ k: 'handToInk' })],
   [`${T} gains? (${KW_RE}) and (${KW_RE}) and can challenge ready characters${DUR}`, m => ({ k: 'grant', t: target(m[1]), kws: [kwObj(m[2]), kwObj(m[3]), { kw: 'challengeReady', v: true }], dur: dur(m[4]) || 'turn' })],
   [`${T} may challenge ready characters this turn`, m => ({ k: 'grant', t: target(m[1]), kws: [{ kw: 'challengeReady', v: true }], dur: 'turn' })],
+  [`put (?:a|an) ${TYPEWORD} card from your discard into your inkwell facedown(?: and exerted)?`, m => ({ k: 'discardToInk', type: m[1] })],
+  [`put (?:a|an) ${TYPEWORD} card from your discard on the top of your deck`, m => ({ k: 'recur', type: m[1], n: 1, top: true })],
+  ['shuffle all ((?:[A-Z][\\w\'-]* )*)(?:character )?cards from your discard into your deck', m => ({ k: 'shuffleBack', cls: m[1].trim() || null })],
+  ['return this card from your discard to your hand', () => ({ k: 'returnSelfCard' })],
+  ['chosen opponent reveals (?:their|his|her) hand and discards a (non-character|song|action|item|character) card of their choice', m => ({ k: 'discard', n: 1, who: 'opp', filter: m[1], pick: true, theirs: true })],
+  ['you pay (\\d+) \\{I\\} less for the next action or item you play this turn', m => ({ k: 'discount', n: +m[1], type: 'any', types: ['action', 'item'] })],
+  [`until the start of your next turn, ${T} can't challenge and must quest if able`, m => ({ k: 'restrict', t: target(m[1]), what: 'challenge', dur: 'untilYourNext' })],
+  ['ready all your characters and deal (\\d+) damage to each of them', m => ({ k: 'readyAll', n: +m[1] })],
+  ['for each (.+?), (?:you may )?draw a card', m => { const n = perOf(m[1]); return n && { k: 'draw', n }; }],
+  ['(they|this character|he|she) may move (?:to a location|there) for free', m => ({ k: 'moveFree', n: 1, it: m[1] === 'they', self: m[1] !== 'they', there: /there/.test(m[0]) })],
+  ["the challenging character's player discards all cards in their hand", () => ({ k: 'discardHand', who: 'opp' })],
   // dégâts, bannissement, renvoi
   [`deal (\\d+) damage to ${T}`, m => ({ k: 'damage', n: +m[1], t: target(m[2]) })],
   [`deal damage to ${T} equal to (?:their|its|this character's) \\{S\\}`, m => ({ k: 'damage', n: 'selfStr', t: target(m[1]) })],
@@ -161,7 +172,7 @@ const RULES = [
   [`return that card to your hand`, () => ({ k: 'recurIt' })],
   [`put ${T} into (?:their|its|your) (?:player's )?inkwell facedown(?: and exerted)?`, m => ({ k: 'toInk', t: target(m[1]) })],
   [`shuffle ${T} into (?:their|its) (?:player's )?deck`, m => ({ k: 'tuck', t: target(m[1]) })],
-  [`put ${T} on the bottom of (?:their|its) (?:player's )?deck`, m => ({ k: 'tuck', t: target(m[1]) })],
+  [`put ${T} on the bottom of (?:their|its) (?:player's |players' )?decks?(?: in any order)?`, m => ({ k: 'tuck', t: target(m[1]) })],
   // épuiser / redresser
   [`exert ${T}`, m => ({ k: 'exert', t: target(m[1]) })],
   [`ready ${T}`, m => ({ k: 'ready', t: target(m[1]) })],
@@ -249,6 +260,10 @@ export function parseCond(s) {
   if (/^you have a character in play with more \{S\} than each opposing character(?: in play)?$/.test(s)) return { c: 'strongest' };
   if (/^you have a character or location in play with a card under them$/.test(s)) return { c: 'anyUnder' };
   if (/^you have an ink drop$/.test(s)) return { c: 'inkDrop' };
+  if (/^you removed an ink drop to play (?:her|him|them|it|this character|this action)$/.test(s)) return { c: 'usedDrop' };
+  if (/^all cards in your inkwell are exerted$/.test(s)) return { c: 'inkSpent' };
+  if (/^one of your characters took damage this turn$/.test(s)) return { c: 'ownTurnEvent', what: 'damaged' };
+  if ((m = s.match(/^you have (\d+) or more other exerted characters in play$/))) return { c: 'chars', n: +m[1], other: true, exerted: true };
   if ((m = s.match(/^a character of yours (challenged|quested) this turn$/))) return { c: 'didTurn', what: m[1] };
   if ((m = s.match(/^none of your characters (challenged|quested) this turn$/))) return { c: 'didTurn', what: m[1], not: true };
   if (/^no other character has quested this turn$/.test(s)) return { c: 'didTurn', what: 'quested', not: true, other: true };
@@ -315,7 +330,7 @@ function parseSentence(raw) {
   let opt = false, cond = null, ifDo = false, m;
   s = s.replace(/^then,?\s+/, '');
   if ((m = s.match(/^if you do,\s*(.+)$/))) { ifDo = true; s = m[1]; }
-  if (/^if .+ (?:is|are) chosen, .+ instead$/.test(s)) return { k: 'noop' };
+  if (/^if .+ (?:is|are) chosen, .+ instead$/.test(s) || /^if you (?:removed an ink drop|used shift) .+ instead$/i.test(s)) return { k: 'noop' };
   // « If it's a song card, you may play it for free » : phrase complète, pas une condition
   if (/^if it's /.test(s)) for (const [re, f] of COMPILED) { const mm = s.match(re); if (mm) { const e = f(mm); return e && (!('t' in e) || e.t) ? { ...e, ...(ifDo ? { ifDo } : {}) } : null; } }
   if ((m = s.match(/^if ([^,]+),\s*(.+)$/))) { cond = parseCond(m[1]); if (!cond) return null; s = m[2]; }
@@ -404,7 +419,8 @@ function parseCounter(s) {
   let m;
   if ((m = s.trim().match(/^(?:the number of )?opposing (damaged |exerted )?characters?(?: in play)?$/))) return { n: 'charsF', side: 'opp', state: m[1]?.trim() || null };
   s = s.trim().replace(/^the number of /, '').replace(/^your /, '').replace(/\bcharacters\b/, 'character').replace(/\bitems\b/, 'item')
-    .replace(/\blocations\b/, 'location').replace(/\bcards\b/, 'card').replace(/ in play$/, ' you have in play').replace(/ you have you have/, ' you have');
+    .replace(/\blocations\b/, 'location').replace(/\bcards\b/, 'card');
+  if (!/ have /.test(s)) s = s.replace(/ in play$/, ' you have in play');
   if (/^card in (?:your opponents'|each opponent's|an opponent's|opponents') hands?$/.test(s)) return { n: 'oppHand' };
   if (/^1 damage on (?:this character|him|her|it|them)$/.test(s)) return { n: 'selfDamage' };
   if (/^1 damage removed this way$/.test(s)) return { n: 'healedWay' };
@@ -541,6 +557,7 @@ const TRIGGERS = [
   [/^whenever you play a second action in a turn$/, () => [{ on: 'youPlay', type: 'action', second: true }]],
   [/^whenever an opponent plays a (character|song|action)$/, m => [{ on: 'oppPlay', type: m[1] }]],
   [/^whenever you ready this character$/, () => [{ on: 'readied' }]],
+  [/^whenever one or more of your characters sings? a song$/, () => [{ on: 'sing', any: true }]],
   [/^whenever this character becomes exerted$/, () => [{ on: 'exerts' }]],
   [/^whenever an opposing character (?:is|becomes) exerted$/, () => [{ on: 'exerts', side: 'opp' }]],
   [/^whenever this character challenges another character with (\d+) \{S\} or less$/, m => [{ on: 'challenge', defMaxStr: +m[1] }]],

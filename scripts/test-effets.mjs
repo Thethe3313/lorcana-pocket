@@ -311,6 +311,27 @@ const endTurn = s => applyAction(s, { type: 'end' });
   applyAction(s3, { type: 'activate', uid: c.uid, index: idx });
   check('Chef : pas de pioche sans bannissement en défi ce tour-ci', s3.players[0].hand.length === h0);
 }
+// 20. Lore par personnage adverse blessé ; redresser et blesser tous ses personnages ; défausse vers l'encrier
+{
+  const s = setup([byName('Pack Tactics')], [filler, filler, filler]);
+  s.active = 1; for (let k = 0; k < 3; k++) play(s, filler.full_name); endTurn(s);
+  s.players[1].play[0].damage = 1; s.players[1].play[1].damage = 1;
+  play(s, 'Pack Tactics');
+  check('Tactique de meute : 1 lore par personnage adverse blessé', s.players[0].lore === 2, `lore ${s.players[0].lore}`);
+
+  const tough = rows.find(r => r.card_type === 'Character' && !r.text_en && r.cost <= 3 && r.willpower >= 3);
+  const s2 = setup([tough, tough, byName('On Your Feet! Now!')]);
+  play(s2, tough.full_name); play(s2, tough.full_name);
+  for (const i of s2.players[0].play) i.exerted = true;
+  play(s2, 'On Your Feet! Now!');
+  check('Debout ! : tous redressés avec 1 dégât, sans pouvoir quêter', s2.players[0].play.every(i => !i.exerted && i.damage === 1) && !applyAction(s2, { type: 'quest', uid: s2.players[0].play[0].uid }).ok);
+
+  const s3 = setup([byName('Rolly - Chubby Puppy')]);
+  s3.players[0].discard = [{ uid: s3.nextUid++, card: parseCard(filler), owner: 0, mods: [], under: [] }];
+  const ink = s3.players[0].inkwell.length;
+  play(s3, 'Rolly - Chubby Puppy');
+  check('Rolly : personnage de la défausse mis dans l\'encrier', s3.players[0].inkwell.length === ink + 1 && !s3.players[0].discard.length);
+}
 
 // 7. Parties complètes avec decks riches en objets, lieux et actions
 const pool = rows.filter(r => /^\d+$/.test(r.set_code) && parseCard(r).battleLegal);
