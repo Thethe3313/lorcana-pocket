@@ -354,6 +354,48 @@ const endTurn = s => applyAction(s, { type: 'end' });
   play(s3, 'Safe and Sound', { target: f.uid }); f.exerted = true; endTurn(s3);
   check('Sain et sauf : le personnage ne peut pas être défié', !applyAction(s3, { type: 'challenge', uid: s3.players[1].play[0].uid, target: f.uid }).ok);
 }
+// 22. Variante « à la place » ; choix de l'adversaire ; capacité donnée ; effet lié à un objet ; déclencheur du tour
+{
+  const villain = rows.find(r => r.card_type === 'Character' && !r.text_en && (r.classifications || []).includes('Villain'));
+  const hero = rows.find(r => r.card_type === 'Character' && !r.text_en && !(r.classifications || []).includes('Villain'));
+  const s = setup([villain, hero, byName('Vicious Betrayal'), byName('Vicious Betrayal')]);
+  play(s, villain.full_name); play(s, hero.full_name);
+  const v = s.players[0].play[0], h = s.players[0].play[1];
+  play(s, 'Vicious Betrayal', { target: v.uid }); play(s, 'Vicious Betrayal', { target: h.uid });
+  check('Trahison : +3 à un Méchant, +2 sinon', strOf(v, s) === villain.strength + 3 && strOf(h, s) === hero.strength + 2, `${strOf(v, s)} / ${strOf(h, s)}`);
+
+  const s2 = setup([byName('Do You Want to Build A Snowman?')], [hero]);
+  s2.active = 1; play(s2, hero.full_name); endTurn(s2);
+  play(s2, 'Do You Want to Build A Snowman?');
+  check('Bonhomme de neige : l\'adversaire choisit l\'option la moins favorable', s2.players[0].lore === 3 || s2.players[1].play.length === 0);
+
+  const s3 = setup([byName('Mulan - Martial Arts Master'), byName('Containment Unit')], [hero, hero]);
+  s3.active = 1; play(s3, hero.full_name); play(s3, hero.full_name); endTurn(s3);
+  const [o1, o2] = s3.players[1].play;
+  play(s3, 'Containment Unit', { target: o1.uid });
+  endTurn(s3);
+  const locked = !canQuestFor(s3, o1) || !canQuestFor(s3, o2);
+  check('Unité de confinement : un personnage adverse ne peut plus quêter', locked);
+  endTurn(s3);
+  banishItem(s3);
+  endTurn(s3);
+  check('… et il est libéré quand l\'objet quitte le jeu', canQuestFor(s3, o1) && canQuestFor(s3, o2));
+
+  const s4 = setup([byName('99 Puppies'), filler]);
+  play(s4, filler.full_name); endTurn(s4); endTurn(s4);
+  play(s4, '99 Puppies');
+  const l0 = s4.players[0].lore;
+  applyAction(s4, { type: 'quest', uid: s4.players[0].play[0].uid });
+  check('99 dalmatiens : +1 lore par quête ce tour-ci', s4.players[0].lore === l0 + filler.lore + 1, `${l0} -> ${s4.players[0].lore}`);
+
+  const s5 = setup([byName('Air Drop')], [villain]);
+  s5.active = 1; play(s5, villain.full_name); endTurn(s5);
+  const t = s5.players[1].play[0]; t.damage = 0;
+  play(s5, 'Air Drop', { target: t.uid });
+  check('Largage : 3 dégâts sur un personnage indemne', t.damage === 3 || !s5.players[1].play.includes(t));
+}
+function canQuestFor(s, inst) { return !inst.mods.some(m => m.restrict) && !(s.players[inst.owner].play.includes(inst) === false); }
+function banishItem(s) { const it = s.players[0].items[0]; if (it) { const P = s.players[0]; P.items.splice(P.items.indexOf(it), 1); for (const i of [...s.players[0].play, ...s.players[1].play]) i.mods = i.mods.filter(m => m.exp?.uid !== it.uid); } }
 
 // 7. Parties complètes avec decks riches en objets, lieux et actions
 const pool = rows.filter(r => /^\d+$/.test(r.set_code) && parseCard(r).battleLegal);
