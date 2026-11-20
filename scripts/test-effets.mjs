@@ -247,6 +247,20 @@ const endTurn = s => applyAction(s, { type: 'end' });
   const koda = s4.players[1].play.find(i => i.card.name === 'Koda');
   check('Kenai épuisé : Koda ne peut pas être défié', !applyAction(s4, { type: 'challenge', uid: s4.players[0].play[0].uid, target: koda.uid }).ok);
 }
+// 17. Boost : payer pour glisser une carte sous le personnage, une fois par tour
+{
+  const zeus = byName('Zeus - Missing His Spark');
+  const s = setup([zeus]);
+  play(s, zeus.full_name); endTurn(s); endTurn(s);
+  const z = s.players[0].play[0], P = s.players[0];
+  const idx = z.card.abilities.findIndex(a => a.label === 'Boost');
+  const used = P.inkUsed, deck = P.deck.length;
+  const r = applyAction(s, { type: 'activate', uid: z.uid, index: idx });
+  check('Boost utilisable', r.ok, r.error);
+  check('Boost : 2 encre, une carte du deck sous Zeus', P.inkUsed === used + 2 && P.deck.length === deck - 1 && z.under.length === 1);
+  check('Zeus avec une carte dessous : +2 force, +2 volonté', strOf(z, s) === zeus.strength + 2 && wilOf(z, s) === zeus.willpower + 2, `${strOf(z, s)}/${wilOf(z, s)}`);
+  check('Boost une seule fois par tour', !applyAction(s, { type: 'activate', uid: z.uid, index: idx }).ok);
+}
 
 // 7. Parties complètes avec decks riches en objets, lieux et actions
 const pool = rows.filter(r => /^\d+$/.test(r.set_code) && parseCard(r).battleLegal);

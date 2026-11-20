@@ -134,6 +134,11 @@ const RULES = [
   ['choose and discard a card or banish this (?:character|item)', () => ({ k: 'choose', options: [[{ k: 'discard', n: 1, who: 'you' }], [{ k: 'banish', t: { sel: 'self' } }]] })],
   [`(?:you )?gain lore equal to the (\\{L\\}|damage) (?:of|on) ${T}`, m => ({ k: 'loreFrom', stat: m[1] === 'damage' ? 'damage' : 'lore', t: target(m[2]) })],
   ['shuffle this card into your deck', () => ({ k: 'tuckSelf' })],
+  ['put the top card of your deck facedown under (him|her|it|them|this character|this location|one of your characters or locations with Boost)', m => ({ k: 'putUnder', self: !/one of your/.test(m[1]) })],
+  [`${T} can't challenge and must quest(?: if able)? during their next turn(?: if able)?`, m => ({ k: 'restrict', t: target(m[1]), what: 'challenge', dur: 'theirNext' })],
+  ['look at (?:chosen opponent\'s|each opponent\'s) hand', () => ({ k: 'noop' })],
+  [`remove (\\d+) damage each from ${T}`, m => ({ k: 'heal', n: +m[1], t: target(m[2]) })],
+  ['(?:if you used Shift to play (?:him|her|them|this character), )?search your deck for any card, put that card into your hand', () => ({ k: 'tutorDeck', type: 'any' })],
   // dégâts, bannissement, renvoi
   [`deal (\\d+) damage to ${T}`, m => ({ k: 'damage', n: +m[1], t: target(m[2]) })],
   [`deal damage to ${T} equal to (?:their|its|this character's) \\{S\\}`, m => ({ k: 'damage', n: 'selfStr', t: target(m[1]) })],
@@ -158,7 +163,7 @@ const RULES = [
   // soins
   [`remove (?:up to )?(\\d+) damage from ${T}`, m => ({ k: 'heal', n: +m[1], t: target(m[2]) })],
   [`remove all damage from ${T}`, m => ({ k: 'heal', n: 99, t: target(m[1]) })],
-  [`move (?:up to )?(\\d+) damage counters? from ${T} to ${T}`, m => ({ k: 'moveDamage', n: +m[1], t: target(m[2]), t2: target(m[3]) })],
+  [`move (?:up to )?(\\d+) damage(?: counters?)? from ${T} to ${T}`, m => ({ k: 'moveDamage', n: +m[1], t: target(m[2]), t2: target(m[3]) })],
   // pioche, défausse, lore
   [`draw (a|\\d+) cards?, then choose and discard (a|\\d+) cards?`, m => ({ k: 'loot', n: num(m[1]), n2: num(m[2]) })],
   [`draw (a|\\d+) cards?`, m => ({ k: 'draw', n: num(m[1]) })],
@@ -502,6 +507,8 @@ const TRIGGERS = [
   [/^whenever you play a second action in a turn$/, () => [{ on: 'youPlay', type: 'action', second: true }]],
   [/^whenever an opponent plays a (character|song|action)$/, m => [{ on: 'oppPlay', type: m[1] }]],
   [/^whenever you ready this character$/, () => [{ on: 'readied' }]],
+  [/^whenever you put a card under (this character|one of your characters or locations)$/, m => [{ on: 'putUnder', any: m[1] !== 'this character' }]],
+  [/^whenever one of your (other )?characters sings a song$/, m => [{ on: 'sing', any: true, other: !!m[1] }]],
   [/^whenever one of your characters banishes another character in a challenge$/, () => [{ on: 'banishInChallenge', any: true }]],
   [/^whenever one of your characters challenges a damaged character$/, () => [{ on: 'challenge', any: true, defDamaged: true }]],
   [/^whenever this character exerts$/, () => [{ on: 'exerts' }]],

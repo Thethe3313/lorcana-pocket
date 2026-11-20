@@ -23,6 +23,8 @@ export function parseCard(row) {
   for (const k of (Array.isArray(row.keywords) ? row.keywords : String(row.keywords || '').split(',')).map(x => x.trim().toLowerCase()))
     if (['evasive', 'rush', 'ward', 'bodyguard', 'reckless', 'support', 'vanish', 'alert'].includes(k)) kw[k] = true;
   const abilities = parsed.abilities;
+  // Boost N : une fois par tour, payer N pour glisser la carte du dessus du deck sous ce personnage ou ce lieu
+  if (parsed.keywords.boost != null) abilities.push({ kind: 'activated', cost: { ink: parsed.keywords.boost }, once: true, label: 'Boost', text: 'Boost', effects: [{ k: 'putUnder', self: true }] });
   const card = {
     id: row.id, name: row.name, version: row.version, fullName: row.full_name || (row.version ? `${row.name} - ${row.version}` : row.name),
     nameEn: row.name_en || row.name, cls: arr(row.classifications),
@@ -382,7 +384,8 @@ function triggerMatches(s, t, src, ev) {
       return !t.second || s.players[src.owner].played.action === 2;
     case 'oppPlay': return ev.inst.owner !== src.owner && typeMatch(ev.inst.card, t.type);
     case 'readied': return ev.inst === src;
-    case 'sing': return ev.singer === src;
+    case 'sing': return t.any ? mine(ev.singer) && (!t.other || ev.singer !== src) : ev.singer === src;
+    case 'putUnder': return t.any ? mine(ev.inst) : ev.inst === src;
     case 'move': return ev.inst === src;
     case 'left': return ev.inst === src;
     case 'challengeDamage': return ev.attacker === src;
@@ -579,6 +582,12 @@ function resolve(s, p, effects, ctx, chosen) {
       }
       case 'discount': P.discounts.push({ n: e.n, type: e.type }); break;
       case 'lookBack': ctx.lookTop = e.top; break;
+      case 'putUnder': {
+        const host = e.self ? src : [...P.play, ...P.locations].filter(i => i.card.kw.boost != null).sort((a, b) => cardValue(b.card) - cardValue(a.card))[0];
+        if (!host || !isInPlay(s, host) || !P.deck.length) { ctx.lastDone = false; break; }
+        host.under.push(P.deck.pop()); log(s, p, `${P.name} glisse une carte sous ${host.card.fullName}.`);
+        fire(s, 'putUnder', { inst: host }); break;
+      }
       case 'exertInk': P.inkUsed = P.inkwell.length; log(s, p, `${P.name} épuise son encrier.`); break;
       case 'discardHand': P.discard.push(...P.hand.splice(0)); log(s, p, `${P.name} défausse sa main.`); break;
       case 'loreFrom': { const t = tg[0]; const n = e.stat === 'damage' ? t.damage : loreOf(t, s); log(s, p, `${P.name} gagne ${n} lore (${name}).`); gainLore(s, p, n); break; }
@@ -722,6 +731,7 @@ export function activateOptions(s, p, uid) {
   if (!i || !isMyTurn(s, p)) return [];
   return i.card.abilities.map((ab, index) => ({ ab, index })).filter(({ ab }) => {
     if (ab.kind !== 'activated') return false;
+    if (ab.once && i.once[ab.text]) return false;
     const c = ab.cost;
     if (c.exert && (i.exerted || (i.card.kind === 'character' && i.fresh))) return false;
     if (c.ink > inkAvailable(P)) return false;
@@ -876,6 +886,7 @@ export function applyAction(s, a) {
       const opt = activateOptions(s, p, a.uid).find(o => o.index === a.index);
       if (!opt) return { ok: false, error: 'Capacité indisponible' };
       const i = inPlay(P).find(x => x.uid === a.uid), ab = i.card.abilities[a.index], c = ab.cost;
+      if (ab.once) i.once[ab.text] = true;
       if (c.exert) { i.exerted = true; fire(s, 'exerts', { inst: i }); }
       let ink = c.ink; const fromDrops = Math.min(P.inkDrops || 0, ink); P.inkDrops -= fromDrops; P.inkUsed += ink - fromDrops;
       if (c.discard) P.discard.push(...chooseCardsToDiscard(P, 1));
@@ -972,6 +983,9 @@ function effectValue(s, p, effects, ctx = {}) {
       case 'delayedBanish': v -= 2; break;
       case 'payInk': v -= e.n * 0.8 + (inkAvailable(P) < e.n ? 50 : 0); break;
       case 'noop': case 'lookBack': break;
+      case 'putUnder': { const host = e.self ? ctx.src : P.play.find(i => i.card.kw.boost != null);
+        const cares = host && host.card.abilities.some(ab => JSON.stringify(ab).includes('under') && ab.label !== 'Boost');
+        v += !host || P.deck.length < 8 ? -1 : cares ? (host.under.length ? 2.2 : 3.5) : 0.2; break; }
       case 'exertInk': v -= Math.max(0, inkAvailable(P)) * 0.5; break;
       case 'discardHand': v -= P.hand.length * 1.2; break;
       case 'loreFrom': v += best ? (e.stat === 'damage' ? best.damage : loreOf(best, s)) * 2.5 : 0; break;
